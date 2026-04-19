@@ -1,5 +1,6 @@
 -- ============================================================
--- SkyRivals Remote Hijacker | Owner Debug Tool
+-- SkyRivals | QuickPlay Race Script
+-- Goal: Get into a filling lobby FASTER than anyone else
 -- ============================================================
 
 local TeleportService   = game:GetService("TeleportService")
@@ -9,22 +10,37 @@ local RunService        = game:GetService("RunService")
 local Players           = game:GetService("Players")
 local UserInputService  = game:GetService("UserInputService")
 
-local PlaceId = 16735970772
-local Player  = Players.LocalPlayer
+local PlaceId   = 16735970772
+local Player    = Players.LocalPlayer
 local PlayerGui = Player:WaitForChild("PlayerGui")
 
 -- ============================================================
 -- CONFIG
 -- ============================================================
 local CONFIG = {
-    MinPlayers       = 1,
-    MaxPlayers       = 20,
-    ServerFetchLimit = 100,
-    MaxPages         = 3,
-    PageDelay        = 0.4,
-    ScanCooldown     = 4,
+    -- Servers with this many players are "filling"
+    -- Low number = earlier you get in = more likely to be in the match
+    FillMin          = 1,
+    FillMax          = 4,
+
+    -- How many servers to fetch per request
+    -- 100 is max the API allows
+    FetchLimit       = 100,
+
+    -- How fast to poll the API looking for a filling server
+    -- 0.1 = 10 times per second (fast but safe)
+    PollRate         = 0.1,
+
+    -- How many poll attempts before giving up
+    -- 50 attempts × 0.1s = 5 seconds max search time
+    MaxAttempts      = 50,
+
+    -- Seconds to wait before allowing another race trigger
+    -- Prevents accidental double-fires
+    TriggerCooldown  = 5,
+
+    Version          = "v5.0",
     MaxLogLines      = 10,
-    Version          = "v4.6",
 }
 
 -- ============================================================
@@ -32,12 +48,11 @@ local CONFIG = {
 -- ============================================================
 local State = {
     LogLines        = {},
-    IsScanning      = false,
-    HijackCount     = 0,
-    ScanCount       = 0,
+    IsRacing        = false,
+    RaceCount       = 0,
+    WinCount        = 0,
     StartTime       = os.time(),
-    LastScanTime    = 0,
-    RemoteLinked    = false,
+    LastTriggerTime = 0,
 }
 
 -- ============================================================
@@ -54,60 +69,60 @@ task.wait(0.1)
 -- GUI
 -- ============================================================
 local screenGui = Instance.new("ScreenGui")
-screenGui.Name           = "SkyRivalsConsole"
-screenGui.ResetOnSpawn   = false
-screenGui.Parent         = PlayerGui
+screenGui.Name         = "SkyRivalsConsole"
+screenGui.ResetOnSpawn = false
+screenGui.Parent       = PlayerGui
 
 local frame = Instance.new("Frame")
-frame.Name              = "MainFrame"
-frame.Size              = UDim2.new(0, 300, 0, 410)
-frame.Position          = UDim2.new(0.5, -150, 0.5, -205)
-frame.BackgroundColor3  = Color3.fromRGB(30, 30, 30)
-frame.BorderSizePixel   = 1
-frame.Active            = true
-frame.Parent            = screenGui
+frame.Name             = "MainFrame"
+frame.Size             = UDim2.new(0, 300, 0, 390)
+frame.Position         = UDim2.new(0.5, -150, 0.5, -195)
+frame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+frame.BorderSizePixel  = 1
+frame.Active           = true
+frame.Parent           = screenGui
 
 local titleLbl = Instance.new("TextLabel")
-titleLbl.Size               = UDim2.new(1, 0, 0, 30)
-titleLbl.Position           = UDim2.new(0, 0, 0, 0)
-titleLbl.Text               = "SR HIJACKER " .. CONFIG.Version
-titleLbl.TextColor3         = Color3.fromRGB(0, 200, 255)
-titleLbl.BackgroundColor3   = Color3.fromRGB(20, 20, 20)
-titleLbl.Font               = Enum.Font.GothamBold
-titleLbl.TextSize           = 14
-titleLbl.BorderSizePixel    = 0
-titleLbl.Parent             = frame
+titleLbl.Size             = UDim2.new(1, 0, 0, 30)
+titleLbl.Position         = UDim2.new(0, 0, 0, 0)
+titleLbl.Text             = "SR RACE " .. CONFIG.Version
+titleLbl.TextColor3       = Color3.fromRGB(0, 200, 255)
+titleLbl.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
+titleLbl.Font             = Enum.Font.GothamBold
+titleLbl.TextSize         = 14
+titleLbl.BorderSizePixel  = 0
+titleLbl.Parent           = frame
 
 local statusLbl = Instance.new("TextLabel")
-statusLbl.Size              = UDim2.new(1, 0, 0, 24)
-statusLbl.Position          = UDim2.new(0, 0, 0, 32)
-statusLbl.Text              = "Status: Initializing..."
-statusLbl.TextColor3        = Color3.fromRGB(255, 255, 255)
-statusLbl.BackgroundColor3  = Color3.fromRGB(25, 25, 25)
-statusLbl.Font              = Enum.Font.Gotham
-statusLbl.TextSize          = 11
-statusLbl.BorderSizePixel   = 0
-statusLbl.Parent            = frame
+statusLbl.Size             = UDim2.new(1, 0, 0, 24)
+statusLbl.Position         = UDim2.new(0, 0, 0, 32)
+statusLbl.Text             = "Status: Waiting for QuickPlay..."
+statusLbl.TextColor3       = Color3.fromRGB(255, 255, 255)
+statusLbl.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+statusLbl.Font             = Enum.Font.Gotham
+statusLbl.TextSize         = 11
+statusLbl.BorderSizePixel  = 0
+statusLbl.Parent           = frame
 
 local function setStatus(txt)
     statusLbl.Text = "Status: " .. txt
 end
 
 local timeLbl = Instance.new("TextLabel")
-timeLbl.Size              = UDim2.new(1, 0, 0, 22)
-timeLbl.Position          = UDim2.new(0, 0, 0, 58)
-timeLbl.Text              = "Server Time: --:--:-- UTC"
-timeLbl.TextColor3        = Color3.fromRGB(200, 200, 200)
-timeLbl.BackgroundColor3  = Color3.fromRGB(25, 25, 25)
-timeLbl.Font              = Enum.Font.Gotham
-timeLbl.TextSize          = 11
-timeLbl.BorderSizePixel   = 0
-timeLbl.Parent            = frame
+timeLbl.Size             = UDim2.new(1, 0, 0, 22)
+timeLbl.Position         = UDim2.new(0, 0, 0, 58)
+timeLbl.Text             = "Server Time: --:--:-- UTC"
+timeLbl.TextColor3       = Color3.fromRGB(200, 200, 200)
+timeLbl.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+timeLbl.Font             = Enum.Font.Gotham
+timeLbl.TextSize         = 11
+timeLbl.BorderSizePixel  = 0
+timeLbl.Parent           = frame
 
 local statsLbl = Instance.new("TextLabel")
 statsLbl.Size             = UDim2.new(1, 0, 0, 22)
 statsLbl.Position         = UDim2.new(0, 0, 0, 82)
-statsLbl.Text             = "Hijacks: 0  |  Scans: 0  |  Uptime: 0s"
+statsLbl.Text             = "Races: 0  |  Wins: 0  |  Uptime: 0s"
 statsLbl.TextColor3       = Color3.fromRGB(200, 200, 200)
 statsLbl.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
 statsLbl.Font             = Enum.Font.Gotham
@@ -116,47 +131,91 @@ statsLbl.BorderSizePixel  = 0
 statsLbl.Parent           = frame
 
 local function updateStats()
-    local up = os.time() - State.StartTime
-    local m  = math.floor(up / 60)
-    local s  = up % 60
+    local up    = os.time() - State.StartTime
+    local m     = math.floor(up / 60)
+    local s     = up % 60
     local upStr = m > 0
         and string.format("%dm%ds", m, s)
         or  string.format("%ds", s)
     statsLbl.Text = string.format(
-        "Hijacks: %d  |  Scans: %d  |  Uptime: %s",
-        State.HijackCount, State.ScanCount, upStr
+        "Races: %d  |  Wins: %d  |  Uptime: %s",
+        State.RaceCount, State.WinCount, upStr
     )
 end
 
-local logLbl = Instance.new("TextLabel")
-logLbl.Size               = UDim2.new(1, -10, 0, 200)
-logLbl.Position           = UDim2.new(0, 5, 0, 110)
-logLbl.Text               = ""
-logLbl.TextColor3         = Color3.fromRGB(200, 255, 200)
-logLbl.BackgroundColor3   = Color3.fromRGB(15, 15, 15)
-logLbl.Font               = Enum.Font.Code
-logLbl.TextSize           = 10
-logLbl.TextXAlignment     = Enum.TextXAlignment.Left
-logLbl.TextYAlignment     = Enum.TextYAlignment.Top
-logLbl.TextWrapped        = true
-logLbl.BorderSizePixel    = 1
-logLbl.Parent             = frame
+-- Race progress bar
+local progressBg = Instance.new("Frame")
+progressBg.Size             = UDim2.new(1, -10, 0, 14)
+progressBg.Position         = UDim2.new(0, 5, 0, 107)
+progressBg.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+progressBg.BorderSizePixel  = 1
+progressBg.Parent           = frame
 
-local scanBtn = Instance.new("TextButton")
-scanBtn.Size              = UDim2.new(0, 88, 0, 30)
-scanBtn.Position          = UDim2.new(0, 5, 0, 318)
-scanBtn.Text              = "SCAN"
-scanBtn.TextColor3        = Color3.fromRGB(255, 255, 255)
-scanBtn.BackgroundColor3  = Color3.fromRGB(30, 90, 200)
-scanBtn.Font              = Enum.Font.GothamBold
-scanBtn.TextSize          = 12
-scanBtn.BorderSizePixel   = 0
-scanBtn.Parent            = frame
+local progressBar = Instance.new("Frame")
+progressBar.Size             = UDim2.new(0, 0, 1, 0)
+progressBar.BackgroundColor3 = Color3.fromRGB(0, 200, 100)
+progressBar.BorderSizePixel  = 0
+progressBar.Parent           = progressBg
+
+local progressLbl = Instance.new("TextLabel")
+progressLbl.Size               = UDim2.new(1, 0, 1, 0)
+progressLbl.Text               = "IDLE"
+progressLbl.TextColor3         = Color3.fromRGB(255, 255, 255)
+progressLbl.BackgroundTransparency = 1
+progressLbl.Font               = Enum.Font.GothamBold
+progressLbl.TextSize           = 9
+progressLbl.Parent             = progressBg
+
+local function setProgress(ratio, label)
+    -- ratio = 0.0 to 1.0
+    progressBar.Size             = UDim2.new(math.clamp(ratio, 0, 1), 0, 1, 0)
+    progressBar.BackgroundColor3 = ratio >= 1
+        and Color3.fromRGB(0, 255, 100)
+        or  Color3.fromRGB(0, 200 * ratio + 50, 255 * (1 - ratio))
+    progressLbl.Text = label or ""
+end
+
+local logLbl = Instance.new("TextLabel")
+logLbl.Size             = UDim2.new(1, -10, 0, 175)
+logLbl.Position         = UDim2.new(0, 5, 0, 128)
+logLbl.Text             = ""
+logLbl.TextColor3       = Color3.fromRGB(200, 255, 200)
+logLbl.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+logLbl.Font             = Enum.Font.Code
+logLbl.TextSize         = 10
+logLbl.TextXAlignment   = Enum.TextXAlignment.Left
+logLbl.TextYAlignment   = Enum.TextYAlignment.Top
+logLbl.TextWrapped      = true
+logLbl.BorderSizePixel  = 1
+logLbl.Parent           = frame
+
+-- Buttons
+local raceBtn = Instance.new("TextButton")
+raceBtn.Size             = UDim2.new(0, 88, 0, 30)
+raceBtn.Position         = UDim2.new(0, 5, 0, 310)
+raceBtn.Text             = "▶ RACE"
+raceBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+raceBtn.BackgroundColor3 = Color3.fromRGB(30, 150, 30)
+raceBtn.Font             = Enum.Font.GothamBold
+raceBtn.TextSize         = 12
+raceBtn.BorderSizePixel  = 0
+raceBtn.Parent           = frame
+
+local stopBtn = Instance.new("TextButton")
+stopBtn.Size             = UDim2.new(0, 88, 0, 30)
+stopBtn.Position         = UDim2.new(0, 100, 0, 310)
+stopBtn.Text             = "■ STOP"
+stopBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
+stopBtn.BackgroundColor3 = Color3.fromRGB(160, 30, 30)
+stopBtn.Font             = Enum.Font.GothamBold
+stopBtn.TextSize         = 12
+stopBtn.BorderSizePixel  = 0
+stopBtn.Parent           = frame
 
 local clearBtn = Instance.new("TextButton")
 clearBtn.Size             = UDim2.new(0, 88, 0, 30)
-clearBtn.Position         = UDim2.new(0, 100, 0, 318)
-clearBtn.Text             = "CLEAR LOG"
+clearBtn.Position         = UDim2.new(0, 195, 0, 310)
+clearBtn.Text             = "CLEAR"
 clearBtn.TextColor3       = Color3.fromRGB(255, 255, 255)
 clearBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 60)
 clearBtn.Font             = Enum.Font.GothamBold
@@ -164,95 +223,73 @@ clearBtn.TextSize         = 12
 clearBtn.BorderSizePixel  = 0
 clearBtn.Parent           = frame
 
-local infoBtn = Instance.new("TextButton")
-infoBtn.Size              = UDim2.new(0, 88, 0, 30)
-infoBtn.Position          = UDim2.new(0, 195, 0, 318)
-infoBtn.Text              = "INFO"
-infoBtn.TextColor3        = Color3.fromRGB(255, 255, 255)
-infoBtn.BackgroundColor3  = Color3.fromRGB(50, 50, 80)
-infoBtn.Font              = Enum.Font.GothamBold
-infoBtn.TextSize          = 12
-infoBtn.BorderSizePixel   = 0
-infoBtn.Parent            = frame
-
--- Range label
+-- Fill range controls
 local rangeLbl = Instance.new("TextLabel")
-rangeLbl.Size             = UDim2.new(1, -10, 0, 22)
-rangeLbl.Position         = UDim2.new(0, 5, 0, 355)
-rangeLbl.Text             = string.format("Target range: %dP - %dP", CONFIG.MinPlayers, CONFIG.MaxPlayers)
+rangeLbl.Size             = UDim2.new(1, -10, 0, 20)
+rangeLbl.Position         = UDim2.new(0, 5, 0, 348)
+rangeLbl.Text             = string.format("Fill range: %dP - %dP  (target filling lobbies)", CONFIG.FillMin, CONFIG.FillMax)
 rangeLbl.TextColor3       = Color3.fromRGB(180, 180, 180)
 rangeLbl.BackgroundColor3 = Color3.fromRGB(20, 20, 20)
 rangeLbl.Font             = Enum.Font.Gotham
-rangeLbl.TextSize         = 11
+rangeLbl.TextSize         = 10
 rangeLbl.BorderSizePixel  = 0
 rangeLbl.Parent           = frame
 
 local function updateRangeLbl()
     rangeLbl.Text = string.format(
-        "Target range: %dP - %dP",
-        CONFIG.MinPlayers, CONFIG.MaxPlayers
+        "Fill range: %dP - %dP  (target filling lobbies)",
+        CONFIG.FillMin, CONFIG.FillMax
     )
 end
 
--- Range buttons
-local rangeButtons = {
-    { label = "Min-", x = 5,   action = function() CONFIG.MinPlayers = math.max(0, CONFIG.MinPlayers - 1) end },
-    { label = "Min+", x = 40,  action = function() CONFIG.MinPlayers = math.min(CONFIG.MaxPlayers, CONFIG.MinPlayers + 1) end },
-    { label = "Max-", x = 80,  action = function() CONFIG.MaxPlayers = math.max(CONFIG.MinPlayers, CONFIG.MaxPlayers - 1) end },
-    { label = "Max+", x = 115, action = function() CONFIG.MaxPlayers = CONFIG.MaxPlayers + 1 end },
+local rangeBtnDefs = {
+    { label = "Fil-", x = 5,   fn = function() CONFIG.FillMin = math.max(0, CONFIG.FillMin - 1) end },
+    { label = "Fil+", x = 40,  fn = function() CONFIG.FillMin = math.min(CONFIG.FillMax, CONFIG.FillMin + 1) end },
+    { label = "Max-", x = 80,  fn = function() CONFIG.FillMax = math.max(CONFIG.FillMin, CONFIG.FillMax - 1) end },
+    { label = "Max+", x = 115, fn = function() CONFIG.FillMax = CONFIG.FillMax + 1 end },
 }
 
-local allRangeBtns = {}
-for _, def in ipairs(rangeButtons) do
+local allContent = { statusLbl, timeLbl, statsLbl, progressBg, logLbl, raceBtn, stopBtn, clearBtn, rangeLbl }
+
+for _, def in ipairs(rangeBtnDefs) do
     local btn = Instance.new("TextButton")
     btn.Size             = UDim2.new(0, 30, 0, 22)
-    btn.Position         = UDim2.new(0, def.x, 0, 380)
+    btn.Position         = UDim2.new(0, def.x, 0, 372)
     btn.Text             = def.label
     btn.TextColor3       = Color3.fromRGB(255, 255, 255)
     btn.BackgroundColor3 = def.label:find("-")
         and Color3.fromRGB(80, 40, 40)
         or  Color3.fromRGB(40, 80, 40)
     btn.Font             = Enum.Font.GothamBold
-    btn.TextSize         = 10
+    btn.TextSize         = 9
     btn.BorderSizePixel  = 0
     btn.Parent           = frame
     btn.MouseButton1Click:Connect(function()
-        def.action()
+        def.fn()
         updateRangeLbl()
     end)
-    table.insert(allRangeBtns, btn)
+    table.insert(allContent, btn)
 end
 
 -- Minimize
 local isMinimized = false
 local minBtn = Instance.new("TextButton")
-minBtn.Size              = UDim2.new(0, 60, 0, 20)
-minBtn.Position          = UDim2.new(0, 235, 0, 5)
-minBtn.Text              = "[ - ]"
-minBtn.TextColor3        = Color3.fromRGB(200, 200, 200)
-minBtn.BackgroundColor3  = Color3.fromRGB(40, 40, 40)
-minBtn.Font              = Enum.Font.GothamBold
-minBtn.TextSize          = 11
-minBtn.BorderSizePixel   = 0
-minBtn.Parent            = frame
-
-local allContent = {
-    statusLbl, timeLbl, statsLbl, logLbl,
-    scanBtn, clearBtn, infoBtn,
-    rangeLbl,
-}
-for _, b in ipairs(allRangeBtns) do
-    table.insert(allContent, b)
-end
+minBtn.Size             = UDim2.new(0, 60, 0, 20)
+minBtn.Position         = UDim2.new(0, 235, 0, 5)
+minBtn.Text             = "[ - ]"
+minBtn.TextColor3       = Color3.fromRGB(200, 200, 200)
+minBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+minBtn.Font             = Enum.Font.GothamBold
+minBtn.TextSize         = 11
+minBtn.BorderSizePixel  = 0
+minBtn.Parent           = frame
 
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
-    for _, v in ipairs(allContent) do
-        v.Visible = not isMinimized
-    end
-    frame.Size = isMinimized
+    for _, v in ipairs(allContent) do v.Visible = not isMinimized end
+    frame.Size  = isMinimized
         and UDim2.new(0, 300, 0, 30)
-        or  UDim2.new(0, 300, 0, 410)
+        or  UDim2.new(0, 300, 0, 390)
     minBtn.Text = isMinimized and "[ + ]" or "[ - ]"
 end)
 
@@ -278,7 +315,7 @@ do
         local vp = screenGui.AbsoluteSize
         frame.Position = UDim2.fromOffset(
             math.clamp(frameOrig.X + d.X, 0, vp.X - 300),
-            math.clamp(frameOrig.Y + d.Y, 0, vp.Y - (isMinimized and 30 or 410))
+            math.clamp(frameOrig.Y + d.Y, 0, vp.Y - (isMinimized and 30 or 390))
         )
     end
     local function stopDrag() dragging = false end
@@ -307,12 +344,8 @@ end
 -- LOGGING
 -- ============================================================
 local prefixMap = {
-    info = "›",
-    ok   = "✓",
-    warn = "⚠",
-    err  = "✕",
-    scan = "◈",
-    time = "⏱",
+    info = "›", ok = "✓", warn = "⚠",
+    err  = "✕", race = "⚡", time = "⏱",
 }
 
 local function log(msg, level)
@@ -331,93 +364,53 @@ local function log(msg, level)
 end
 
 -- ============================================================
--- HTTP WRAPPER
--- http_request() primary, all others as fallback
+-- HTTP  (http_request primary)
 -- ============================================================
 local function httpGet(url)
-
-    -- ── PRIMARY: http_request ──────────────────────────────
+    -- PRIMARY: http_request
     if http_request then
         local ok, res = pcall(http_request, {
             Url     = url,
             Method  = "GET",
             Headers = { ["Accept"] = "application/json" },
         })
-
-        if not ok then
-            log("http_request pcall err: " .. tostring(res), "err")
-            -- fall through to next method
-        elseif res then
+        if ok and res then
             local code = tonumber(res.StatusCode or res.statusCode) or 200
-
-            if code == 429 then
-                return nil, "RATE_LIMITED"
-            end
-
-            if code ~= 200 then
-                return nil, "HTTP_STATUS_" .. tostring(code)
-            end
-
+            if code == 429 then return nil, "RATE_LIMITED" end
+            if code ~= 200 then return nil, "HTTP_" .. tostring(code) end
             local body = res.Body or res.body
-            if body and #body > 0 then
-                return body
-            else
-                return nil, "EMPTY_BODY"
-            end
-        else
-            log("http_request returned nil", "err")
+            if body and #body > 0 then return body end
+            return nil, "EMPTY_BODY"
         end
+        return nil, "http_request pcall failed: " .. tostring(res)
     end
 
-    -- ── FALLBACK 1: request ────────────────────────────────
+    -- FALLBACK: request
     if request then
         local ok, res = pcall(request, {
             Url     = url,
             Method  = "GET",
             Headers = { ["Accept"] = "application/json" },
         })
-
         if ok and res then
             local code = tonumber(res.StatusCode or res.statusCode) or 200
             if code == 429 then return nil, "RATE_LIMITED" end
-            if code ~= 200 then return nil, "HTTP_STATUS_" .. tostring(code) end
+            if code ~= 200 then return nil, "HTTP_" .. tostring(code) end
             local body = res.Body or res.body
             if body and #body > 0 then return body end
         end
-
-        log("request() fallback also failed", "warn")
     end
 
-    -- ── FALLBACK 2: syn.request ────────────────────────────
+    -- FALLBACK: syn
     if syn and syn.request then
-        local ok, res = pcall(syn.request, {
-            Url    = url,
-            Method = "GET",
-        })
-
+        local ok, res = pcall(syn.request, { Url = url, Method = "GET" })
         if ok and res then
-            local code = tonumber(res.StatusCode) or 200
-            if code == 429 then return nil, "RATE_LIMITED" end
-            if code ~= 200 then return nil, "HTTP_STATUS_" .. tostring(code) end
             local body = res.Body or res.body
             if body and #body > 0 then return body end
         end
-
-        log("syn.request fallback also failed", "warn")
     end
 
-    -- ── FALLBACK 3: game:HttpGet ───────────────────────────
-    if game.HttpGet then
-        local ok, res = pcall(function()
-            return game:HttpGet(url)
-        end)
-        if ok and res and #res > 0 then
-            return res
-        end
-        log("game:HttpGet fallback also failed", "warn")
-    end
-
-    return nil, "ALL_HTTP_METHODS_FAILED"
+    return nil, "ALL_HTTP_FAILED"
 end
 
 -- ============================================================
@@ -431,231 +424,188 @@ end)
 -- ============================================================
 -- REMOTE LINKING
 -- ============================================================
-log("Waiting for Remotes...", "scan")
+log("Waiting for QuickPlay remote...", "race")
 
 local RemoteFolder = ReplicatedStorage:WaitForChild("Remotes", 10)
 local QuickPlay    = RemoteFolder and RemoteFolder:WaitForChild("QuickPlay", 10)
 
 if QuickPlay then
-    State.RemoteLinked = true
-    setStatus("Remote linked - Ready")
-    log("QuickPlay remote linked", "ok")
+    setStatus("Hooked — click QuickPlay to race")
+    log("QuickPlay remote found", "ok")
 else
-    setStatus("Remote NOT found - scan only")
-    log("QuickPlay remote not found", "err")
+    setStatus("Remote not found — manual scan only")
+    log("QuickPlay not found", "err")
 end
 
 -- ============================================================
--- SERVER FETCH  (paginated, rate-limit aware)
+-- CORE RACE LOGIC
+-- This is the entire point of the script.
+-- Poll the API as fast as safely possible,
+-- the MOMENT a filling server appears → teleport instantly.
 -- ============================================================
-local function fetchAllServers()
-    State.ScanCount += 1
+local stopRace = false  -- flag to cancel mid-race
 
-    local allServers = {}
-    local cursor     = nil
-    local page       = 1
+local function doRace(onFail)
+    if State.IsRacing then
+        log("Already racing", "warn")
+        return
+    end
 
-    while page <= CONFIG.MaxPages do
-        local url = string.format(
-            "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=%d",
-            PlaceId, CONFIG.ServerFetchLimit
-        )
-        if cursor and cursor ~= "" then
-            url = url .. "&cursor=" .. cursor
-        end
+    stopRace         = false
+    State.IsRacing   = true
+    State.RaceCount += 1
+    local attempt    = 0
+    local raceStart  = os.clock()
 
-        log(string.format("Page %d/%d...", page, CONFIG.MaxPages), "scan")
+    log(string.format(
+        "RACE STARTED | target %dP-%dP | max %d attempts",
+        CONFIG.FillMin, CONFIG.FillMax, CONFIG.MaxAttempts
+    ), "race")
+    setStatus("Racing...")
 
+    local url = string.format(
+        "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=%d",
+        PlaceId, CONFIG.FetchLimit
+    )
+
+    while attempt < CONFIG.MaxAttempts and not stopRace do
+        attempt += 1
+
+        -- Update progress bar
+        local ratio = attempt / CONFIG.MaxAttempts
+        setProgress(ratio, string.format("Attempt %d/%d", attempt, CONFIG.MaxAttempts))
+
+        -- Fetch server list
         local body, err = httpGet(url)
 
-        -- Handle rate limiting with one retry
-        if not body and err == "RATE_LIMITED" then
-            log("Rate limited — waiting 5s then retrying", "warn")
-            task.wait(5)
-            body, err = httpGet(url)
-        end
-
         if not body then
-            log("Fetch stopped: " .. tostring(err), "err")
-            break
+            if err == "RATE_LIMITED" then
+                -- Back off on rate limit
+                log("Rate limited — backing off 2s", "warn")
+                task.wait(2)
+                continue
+            else
+                log("Fetch err: " .. tostring(err), "err")
+                task.wait(0.5)
+                continue
+            end
         end
 
-        -- Decode
+        -- Decode JSON
         local ok, decoded = pcall(HttpService.JSONDecode, HttpService, body)
-        if not ok or not decoded then
-            log("JSON error: " .. tostring(decoded), "err")
-            -- Log raw body preview to help diagnose
-            log("Body preview: " .. tostring(body):sub(1, 80), "info")
-            break
+        if not ok or not decoded or not decoded.data then
+            task.wait(CONFIG.PollRate)
+            continue
         end
 
-        if not decoded.data then
-            log("Missing 'data' key in JSON", "err")
-            log("Keys present: " .. (function()
-                local keys = {}
-                for k in pairs(decoded) do table.insert(keys, tostring(k)) end
-                return table.concat(keys, ", ")
-            end)(), "info")
-            break
-        end
+        -- ── THE RACE FILTER ──────────────────────────────
+        -- Find the BEST filling server as fast as possible
+        -- Priority: lowest player count in range (just started filling = 
+        -- most room + most time before it locks)
+        local bestServer = nil
+        local bestCount  = math.huge
 
-        local pageCount = #decoded.data
         for _, sv in ipairs(decoded.data) do
-            table.insert(allServers, sv)
-        end
+            -- Skip current server
+            if sv.id == game.JobId then continue end
 
-        log(string.format(
-            "Page %d: +%d servers (total %d)",
-            page, pageCount, #allServers
-        ), "info")
-
-        -- Pagination
-        if decoded.nextPageCursor
-        and decoded.nextPageCursor ~= ""
-        and decoded.nextPageCursor ~= nil then
-            cursor = decoded.nextPageCursor
-        else
-            log("Last page reached", "info")
-            break
-        end
-
-        page += 1
-
-        -- Controlled delay between pages
-        if page <= CONFIG.MaxPages then
-            task.wait(CONFIG.PageDelay)
-        end
-    end
-
-    return #allServers > 0 and allServers or nil
-end
-
--- ============================================================
--- FIND BEST SERVER
--- ============================================================
-local function findBestServer(servers)
-    local candidates = {}
-
-    for _, sv in ipairs(servers) do
-        if sv.id == game.JobId then continue end
-
-        local p   = tonumber(sv.playing)    or 0
-        local cap = tonumber(sv.maxPlayers) or 0
-
-        if p >= CONFIG.MinPlayers and p <= CONFIG.MaxPlayers then
-            local midpoint  = (CONFIG.MinPlayers + CONFIG.MaxPlayers) / 2
-            local distScore = 1 / (1 + math.abs(p - midpoint))
-            local pingScore = sv.ping and (1 / (1 + sv.ping)) or 0.5
-            local fillScore = cap > 0 and (p / cap) or 0
-            local total     = distScore * 0.5 + pingScore * 0.3 + fillScore * 0.2
-
-            table.insert(candidates, { server = sv, score = total })
-        end
-    end
-
-    if #candidates == 0 then return nil end
-
-    table.sort(candidates, function(a, b) return a.score > b.score end)
-
-    -- Log top candidates
-    for i = 1, math.min(3, #candidates) do
-        local c  = candidates[i]
-        local sv = c.server
-        log(string.format(
-            "#%d: %dP/%dP | ping~%s | score %.2f",
-            i,
-            tonumber(sv.playing) or 0,
-            tonumber(sv.maxPlayers) or 0,
-            sv.ping and tostring(math.floor(sv.ping)) or "?",
-            c.score
-        ), "info")
-    end
-
-    return candidates[1].server
-end
-
--- ============================================================
--- SCAN AND TELEPORT
--- ============================================================
-local scanAndTeleport
-
-scanAndTeleport = function(originalCall)
-    if State.IsScanning then
-        log("Already scanning", "warn")
-        return
-    end
-
-    State.IsScanning   = true
-    State.LastScanTime = os.time()
-    setStatus("Scanning...")
-    log(string.format(
-        "Scan | range [%d-%dP] | %d pages x %d",
-        CONFIG.MinPlayers, CONFIG.MaxPlayers,
-        CONFIG.MaxPages, CONFIG.ServerFetchLimit
-    ), "scan")
-
-    local servers = fetchAllServers()
-
-    if not servers then
-        log("No servers returned at all", "err")
-        setStatus("Scan failed - fallback")
-        State.IsScanning = false
-        if originalCall then originalCall() end
-        return
-    end
-
-    log("Total fetched: " .. #servers .. " servers", "info")
-
-    local target = findBestServer(servers)
-
-    if target then
-        local p    = tonumber(target.playing) or 0
-        local cap  = tonumber(target.maxPlayers) or 0
-        local ping = target.ping and math.floor(target.ping) or "?"
-
-        log(string.format(
-            "Target: %dP/%dP | ~%sms",
-            p, cap, tostring(ping)
-        ), "ok")
-        setStatus("Teleporting to " .. p .. "P server")
-        log("Joining " .. tostring(target.id):sub(1, 18) .. "...", "ok")
-
-        task.wait(0.15)
-
-        local tpOk, tpErr = pcall(function()
-            TeleportService:TeleportToPlaceInstance(PlaceId, target.id, Player)
-        end)
-
-        if not tpOk then
-            log("Teleport failed: " .. tostring(tpErr), "err")
-            setStatus("Teleport failed - fallback")
-            if originalCall then originalCall() end
-        end
-    else
-        -- Dump player counts for diagnosis
-        local counts = {}
-        for _, sv in ipairs(servers) do
             local p = tonumber(sv.playing) or 0
-            table.insert(counts, tostring(p))
+
+            -- Is this server in our target fill range?
+            if p >= CONFIG.FillMin and p <= CONFIG.FillMax then
+                -- Take the server with FEWEST players
+                -- (freshest lobby = most advantage)
+                if p < bestCount then
+                    bestCount  = p
+                    bestServer = sv
+                end
+            end
         end
-        local countStr = table.concat(counts, " "):sub(1, 100)
-        log("Player counts: " .. countStr, "warn")
-        log(string.format(
-            "No server matched [%d-%dP] — adjust range!",
-            CONFIG.MinPlayers, CONFIG.MaxPlayers
-        ), "warn")
-        setStatus("No match - adjust range with buttons")
-        if originalCall then originalCall() end
+
+        -- ── FOUND ONE — GO IMMEDIATELY ───────────────────
+        if bestServer then
+            local elapsed = os.clock() - raceStart
+            local p       = tonumber(bestServer.playing) or 0
+            local cap     = tonumber(bestServer.maxPlayers) or 0
+            local ping    = bestServer.ping
+                and math.floor(bestServer.ping) or "?"
+
+            log(string.format(
+                "FOUND! %dP/%dP | ~%sms | attempt %d | %.2fs",
+                p, cap, tostring(ping), attempt, elapsed
+            ), "ok")
+            setStatus(string.format("Teleporting! (%dP server)", p))
+            setProgress(1, "LOCKED IN!")
+
+            -- Teleport instantly — no delays
+            local tpOk, tpErr = pcall(function()
+                TeleportService:TeleportToPlaceInstance(
+                    PlaceId, bestServer.id, Player
+                )
+            end)
+
+            if tpOk then
+                State.WinCount  += 1
+                State.IsRacing   = false
+                return
+            else
+                log("TP failed: " .. tostring(tpErr), "err")
+                -- Server may have filled up in the milliseconds between
+                -- finding it and teleporting — keep racing
+            end
+        else
+            -- Log every 5 attempts so we don't spam
+            if attempt % 5 == 0 then
+                log(string.format(
+                    "Attempt %d — no fill server yet, polling...",
+                    attempt
+                ), "info")
+            end
+        end
+
+        -- Poll again after short delay
+        task.wait(CONFIG.PollRate)
     end
 
-    State.IsScanning = false
+    -- ── RACE FAILED (no server found in time) ────────────
+    if not stopRace then
+        local elapsed = os.clock() - raceStart
+        log(string.format(
+            "No filling server found after %d attempts (%.1fs)",
+            attempt, elapsed
+        ), "warn")
+        setStatus("No filling lobby found — try again")
+        setProgress(0, "FAILED")
+
+        -- Fall back to normal QuickPlay if called from hook
+        if onFail then onFail() end
+    else
+        log("Race stopped manually", "warn")
+        setStatus("Stopped — click QuickPlay to race")
+        setProgress(0, "STOPPED")
+    end
+
+    State.IsRacing = false
 end
 
 -- ============================================================
 -- BUTTON WIRING
 -- ============================================================
-scanBtn.MouseButton1Click:Connect(function()
-    task.spawn(scanAndTeleport, nil)
+raceBtn.MouseButton1Click:Connect(function()
+    if State.IsRacing then
+        log("Already racing", "warn")
+        return
+    end
+    task.spawn(doRace, nil)
+end)
+
+stopBtn.MouseButton1Click:Connect(function()
+    if State.IsRacing then
+        stopRace = true
+        log("Stop requested", "warn")
+    else
+        log("Not currently racing", "info")
+    end
 end)
 
 clearBtn.MouseButton1Click:Connect(function()
@@ -664,26 +614,8 @@ clearBtn.MouseButton1Click:Connect(function()
     log("Log cleared", "info")
 end)
 
-infoBtn.MouseButton1Click:Connect(function()
-    -- Detect active HTTP method
-    local method = "none"
-    if http_request       then method = "http_request()" end
-    if request            then method = method .. " + request()" end
-    if syn and syn.request then method = method .. " + syn.request" end
-
-    log("HTTP: " .. method, "info")
-    log("PlaceId: " .. tostring(PlaceId), "info")
-    log("JobId: "   .. game.JobId:sub(1, 14) .. "...", "info")
-    log("Players here: " .. #Players:GetPlayers(), "info")
-    log(string.format(
-        "Range [%d-%dP] | %d pages | %.1fs delay",
-        CONFIG.MinPlayers, CONFIG.MaxPlayers,
-        CONFIG.MaxPages, CONFIG.PageDelay
-    ), "info")
-end)
-
 -- ============================================================
--- HOOK
+-- HOOK  (the real trigger — fires when player clicks QuickPlay)
 -- ============================================================
 if hookmetamethod and getnamecallmethod then
     local oldNC
@@ -692,38 +624,43 @@ if hookmetamethod and getnamecallmethod then
 
         if self == QuickPlay
         and (method == "FireServer" or method == "InvokeServer") then
-            State.HijackCount += 1
 
-            if (os.time() - State.LastScanTime) < CONFIG.ScanCooldown then
-                log("Cooldown - passing through", "warn")
-                return oldNC(self, ...)
+            -- Cooldown so accidental double clicks don't fire twice
+            local now = os.time()
+            if (now - State.LastTriggerTime) < CONFIG.TriggerCooldown then
+                log("Cooldown — ignoring duplicate trigger", "warn")
+                return nil
             end
+            State.LastTriggerTime = now
 
             local args = { ... }
+            log("QuickPlay intercepted — starting race!", "race")
+
             task.spawn(function()
-                scanAndTeleport(function()
-                    pcall(function()
-                        oldNC(self, table.unpack(args))
-                    end)
+                doRace(function()
+                    -- Only fires if race totally failed
+                    -- Let original QuickPlay through as last resort
+                    log("Falling back to normal QuickPlay", "warn")
+                    pcall(function() oldNC(self, table.unpack(args)) end)
                 end)
             end)
 
+            -- Block original call — we handle it
             return nil
         end
 
         return oldNC(self, ...)
     end)
 
-    log("Hook active", "ok")
+    log("Hook active — click QuickPlay to race", "ok")
 else
     log("hookmetamethod unavailable", "warn")
-    setStatus("Hook N/A - scan-only mode")
+    setStatus("Hook N/A — use RACE button manually")
 end
 
 -- ============================================================
 -- STARTUP
 -- ============================================================
-log("SR Hijacker " .. CONFIG.Version .. " ready", "ok")
+log("SR Race " .. CONFIG.Version .. " loaded", "ok")
 log("Time: " .. os.date("!%H:%M:%S") .. " UTC", "time")
-log("Press INFO for diagnostics", "info")
-log("Press SCAN or trigger QuickPlay", "info")
+log("Click QuickPlay OR press RACE button", "info")
