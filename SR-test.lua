@@ -17,14 +17,14 @@ local PlayerGui = Player:WaitForChild("PlayerGui")
 -- CONFIG
 -- ============================================================
 local CONFIG = {
-    MinPlayers       = 1,   -- lowered: catch any server with at least 1 player
-    MaxPlayers       = 20,  -- raised: don't miss servers
-    ServerFetchLimit = 100, -- fetch more servers per page
-    MaxPages         = 3,   -- scan up to 3 pages (300 servers total)
-    PageDelay        = 0.4, -- delay between pages to avoid rate limiting
-    ScanCooldown     = 4,   -- seconds between hijack triggers
+    MinPlayers       = 1,
+    MaxPlayers       = 20,
+    ServerFetchLimit = 100,
+    MaxPages         = 3,
+    PageDelay        = 0.4,
+    ScanCooldown     = 4,
     MaxLogLines      = 10,
-    Version          = "v4.5",
+    Version          = "v4.6",
 }
 
 -- ============================================================
@@ -175,7 +175,7 @@ infoBtn.TextSize          = 12
 infoBtn.BorderSizePixel   = 0
 infoBtn.Parent            = frame
 
--- Range adjustment buttons
+-- Range label
 local rangeLbl = Instance.new("TextLabel")
 rangeLbl.Size             = UDim2.new(1, -10, 0, 22)
 rangeLbl.Position         = UDim2.new(0, 5, 0, 355)
@@ -194,66 +194,34 @@ local function updateRangeLbl()
     )
 end
 
-local minDownBtn = Instance.new("TextButton")
-minDownBtn.Size             = UDim2.new(0, 30, 0, 22)
-minDownBtn.Position         = UDim2.new(0, 5, 0, 380)
-minDownBtn.Text             = "Min-"
-minDownBtn.TextColor3       = Color3.fromRGB(255,255,255)
-minDownBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
-minDownBtn.Font             = Enum.Font.GothamBold
-minDownBtn.TextSize         = 10
-minDownBtn.BorderSizePixel  = 0
-minDownBtn.Parent           = frame
+-- Range buttons
+local rangeButtons = {
+    { label = "Min-", x = 5,   action = function() CONFIG.MinPlayers = math.max(0, CONFIG.MinPlayers - 1) end },
+    { label = "Min+", x = 40,  action = function() CONFIG.MinPlayers = math.min(CONFIG.MaxPlayers, CONFIG.MinPlayers + 1) end },
+    { label = "Max-", x = 80,  action = function() CONFIG.MaxPlayers = math.max(CONFIG.MinPlayers, CONFIG.MaxPlayers - 1) end },
+    { label = "Max+", x = 115, action = function() CONFIG.MaxPlayers = CONFIG.MaxPlayers + 1 end },
+}
 
-local minUpBtn = Instance.new("TextButton")
-minUpBtn.Size             = UDim2.new(0, 30, 0, 22)
-minUpBtn.Position         = UDim2.new(0, 40, 0, 380)
-minUpBtn.Text             = "Min+"
-minUpBtn.TextColor3       = Color3.fromRGB(255,255,255)
-minUpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
-minUpBtn.Font             = Enum.Font.GothamBold
-minUpBtn.TextSize         = 10
-minUpBtn.BorderSizePixel  = 0
-minUpBtn.Parent           = frame
-
-local maxDownBtn = Instance.new("TextButton")
-maxDownBtn.Size             = UDim2.new(0, 30, 0, 22)
-maxDownBtn.Position         = UDim2.new(0, 80, 0, 380)
-maxDownBtn.Text             = "Max-"
-maxDownBtn.TextColor3       = Color3.fromRGB(255,255,255)
-maxDownBtn.BackgroundColor3 = Color3.fromRGB(80, 40, 40)
-maxDownBtn.Font             = Enum.Font.GothamBold
-maxDownBtn.TextSize         = 10
-maxDownBtn.BorderSizePixel  = 0
-maxDownBtn.Parent           = frame
-
-local maxUpBtn = Instance.new("TextButton")
-maxUpBtn.Size             = UDim2.new(0, 30, 0, 22)
-maxUpBtn.Position         = UDim2.new(0, 115, 0, 380)
-maxUpBtn.Text             = "Max+"
-maxUpBtn.TextColor3       = Color3.fromRGB(255,255,255)
-maxUpBtn.BackgroundColor3 = Color3.fromRGB(40, 80, 40)
-maxUpBtn.Font             = Enum.Font.GothamBold
-maxUpBtn.TextSize         = 10
-maxUpBtn.BorderSizePixel  = 0
-maxUpBtn.Parent           = frame
-
-minDownBtn.MouseButton1Click:Connect(function()
-    CONFIG.MinPlayers = math.max(0, CONFIG.MinPlayers - 1)
-    updateRangeLbl()
-end)
-minUpBtn.MouseButton1Click:Connect(function()
-    CONFIG.MinPlayers = math.min(CONFIG.MaxPlayers, CONFIG.MinPlayers + 1)
-    updateRangeLbl()
-end)
-maxDownBtn.MouseButton1Click:Connect(function()
-    CONFIG.MaxPlayers = math.max(CONFIG.MinPlayers, CONFIG.MaxPlayers - 1)
-    updateRangeLbl()
-end)
-maxUpBtn.MouseButton1Click:Connect(function()
-    CONFIG.MaxPlayers = CONFIG.MaxPlayers + 1
-    updateRangeLbl()
-end)
+local allRangeBtns = {}
+for _, def in ipairs(rangeButtons) do
+    local btn = Instance.new("TextButton")
+    btn.Size             = UDim2.new(0, 30, 0, 22)
+    btn.Position         = UDim2.new(0, def.x, 0, 380)
+    btn.Text             = def.label
+    btn.TextColor3       = Color3.fromRGB(255, 255, 255)
+    btn.BackgroundColor3 = def.label:find("-")
+        and Color3.fromRGB(80, 40, 40)
+        or  Color3.fromRGB(40, 80, 40)
+    btn.Font             = Enum.Font.GothamBold
+    btn.TextSize         = 10
+    btn.BorderSizePixel  = 0
+    btn.Parent           = frame
+    btn.MouseButton1Click:Connect(function()
+        def.action()
+        updateRangeLbl()
+    end)
+    table.insert(allRangeBtns, btn)
+end
 
 -- Minimize
 local isMinimized = false
@@ -271,8 +239,11 @@ minBtn.Parent            = frame
 local allContent = {
     statusLbl, timeLbl, statsLbl, logLbl,
     scanBtn, clearBtn, infoBtn,
-    rangeLbl, minDownBtn, minUpBtn, maxDownBtn, maxUpBtn,
+    rangeLbl,
 }
+for _, b in ipairs(allRangeBtns) do
+    table.insert(allContent, b)
+end
 
 minBtn.MouseButton1Click:Connect(function()
     isMinimized = not isMinimized
@@ -336,7 +307,12 @@ end
 -- LOGGING
 -- ============================================================
 local prefixMap = {
-    info="›", ok="✓", warn="⚠", err="✕", scan="◈", time="⏱",
+    info = "›",
+    ok   = "✓",
+    warn = "⚠",
+    err  = "✕",
+    scan = "◈",
+    time = "⏱",
 }
 
 local function log(msg, level)
@@ -355,70 +331,93 @@ local function log(msg, level)
 end
 
 -- ============================================================
--- HTTP WRAPPER  (handles request() body/Body inconsistency)
+-- HTTP WRAPPER
+-- http_request() primary, all others as fallback
 -- ============================================================
 local function httpGet(url)
-    -- request() used by most modern executors
-    if request then
-        local ok, res = pcall(request, {
-            Url    = url,
-            Method = "GET",
-            Headers = {
-                ["Accept"] = "application/json",
-            },
+
+    -- ── PRIMARY: http_request ──────────────────────────────
+    if http_request then
+        local ok, res = pcall(http_request, {
+            Url     = url,
+            Method  = "GET",
+            Headers = { ["Accept"] = "application/json" },
         })
 
-        if ok and res then
-            -- Status code check
-            local code = res.StatusCode or res.statusCode or 200
+        if not ok then
+            log("http_request pcall err: " .. tostring(res), "err")
+            -- fall through to next method
+        elseif res then
+            local code = tonumber(res.StatusCode or res.statusCode) or 200
+
             if code == 429 then
                 return nil, "RATE_LIMITED"
             end
+
             if code ~= 200 then
-                return nil, "HTTP_" .. tostring(code)
+                return nil, "HTTP_STATUS_" .. tostring(code)
             end
 
-            -- Body key varies between executors
             local body = res.Body or res.body
-            if body and body ~= "" then
+            if body and #body > 0 then
                 return body
             else
-                return nil, "EMPTY_BODY (code=" .. tostring(code) .. ")"
+                return nil, "EMPTY_BODY"
             end
         else
-            return nil, "request() pcall failed: " .. tostring(res)
+            log("http_request returned nil", "err")
         end
     end
 
-    -- syn.request fallback
+    -- ── FALLBACK 1: request ────────────────────────────────
+    if request then
+        local ok, res = pcall(request, {
+            Url     = url,
+            Method  = "GET",
+            Headers = { ["Accept"] = "application/json" },
+        })
+
+        if ok and res then
+            local code = tonumber(res.StatusCode or res.statusCode) or 200
+            if code == 429 then return nil, "RATE_LIMITED" end
+            if code ~= 200 then return nil, "HTTP_STATUS_" .. tostring(code) end
+            local body = res.Body or res.body
+            if body and #body > 0 then return body end
+        end
+
+        log("request() fallback also failed", "warn")
+    end
+
+    -- ── FALLBACK 2: syn.request ────────────────────────────
     if syn and syn.request then
         local ok, res = pcall(syn.request, {
             Url    = url,
             Method = "GET",
         })
+
         if ok and res then
-            local code = res.StatusCode or 200
+            local code = tonumber(res.StatusCode) or 200
             if code == 429 then return nil, "RATE_LIMITED" end
+            if code ~= 200 then return nil, "HTTP_STATUS_" .. tostring(code) end
             local body = res.Body or res.body
-            if body and body ~= "" then return body end
+            if body and #body > 0 then return body end
         end
-        return nil, "syn.request failed"
+
+        log("syn.request fallback also failed", "warn")
     end
 
-    -- http_request fallback
-    if http_request then
-        local ok, res = pcall(http_request, {
-            Url    = url,
-            Method = "GET",
-        })
-        if ok and res then
-            local body = res.Body or res.body
-            if body and body ~= "" then return body end
+    -- ── FALLBACK 3: game:HttpGet ───────────────────────────
+    if game.HttpGet then
+        local ok, res = pcall(function()
+            return game:HttpGet(url)
+        end)
+        if ok and res and #res > 0 then
+            return res
         end
-        return nil, "http_request failed"
+        log("game:HttpGet fallback also failed", "warn")
     end
 
-    return nil, "No HTTP function available"
+    return nil, "ALL_HTTP_METHODS_FAILED"
 end
 
 -- ============================================================
@@ -447,7 +446,7 @@ else
 end
 
 -- ============================================================
--- SERVER FETCH  (multi-page with rate limit protection)
+-- SERVER FETCH  (paginated, rate-limit aware)
 -- ============================================================
 local function fetchAllServers()
     State.ScanCount += 1
@@ -457,71 +456,72 @@ local function fetchAllServers()
     local page       = 1
 
     while page <= CONFIG.MaxPages do
-        -- Build URL with cursor for pagination
         local url = string.format(
             "https://games.roblox.com/v1/games/%d/servers/Public?sortOrder=Desc&limit=%d",
             PlaceId, CONFIG.ServerFetchLimit
         )
-        if cursor then
+        if cursor and cursor ~= "" then
             url = url .. "&cursor=" .. cursor
         end
 
-        log(string.format("Fetching page %d/%d...", page, CONFIG.MaxPages), "scan")
+        log(string.format("Page %d/%d...", page, CONFIG.MaxPages), "scan")
 
         local body, err = httpGet(url)
 
+        -- Handle rate limiting with one retry
+        if not body and err == "RATE_LIMITED" then
+            log("Rate limited — waiting 5s then retrying", "warn")
+            task.wait(5)
+            body, err = httpGet(url)
+        end
+
         if not body then
-            if err == "RATE_LIMITED" then
-                log("Rate limited! Waiting 5s...", "warn")
-                task.wait(5)
-                -- Retry same page once
-                body, err = httpGet(url)
-                if not body then
-                    log("Still rate limited - stopping early", "err")
-                    break
-                end
-            else
-                log("Fetch error: " .. tostring(err), "err")
-                break
-            end
-        end
-
-        -- Decode JSON
-        local ok, res = pcall(function()
-            return HttpService:JSONDecode(body)
-        end)
-
-        if not ok or not res then
-            log("JSON decode error: " .. tostring(res), "err")
+            log("Fetch stopped: " .. tostring(err), "err")
             break
         end
 
-        if not res.data then
-            log("No data in response (body preview): " .. tostring(body):sub(1, 60), "err")
+        -- Decode
+        local ok, decoded = pcall(HttpService.JSONDecode, HttpService, body)
+        if not ok or not decoded then
+            log("JSON error: " .. tostring(decoded), "err")
+            -- Log raw body preview to help diagnose
+            log("Body preview: " .. tostring(body):sub(1, 80), "info")
             break
         end
 
-        -- Collect servers
-        for _, sv in ipairs(res.data) do
+        if not decoded.data then
+            log("Missing 'data' key in JSON", "err")
+            log("Keys present: " .. (function()
+                local keys = {}
+                for k in pairs(decoded) do table.insert(keys, tostring(k)) end
+                return table.concat(keys, ", ")
+            end)(), "info")
+            break
+        end
+
+        local pageCount = #decoded.data
+        for _, sv in ipairs(decoded.data) do
             table.insert(allServers, sv)
         end
 
         log(string.format(
-            "Page %d: got %d servers (total: %d)",
-            page, #res.data, #allServers
+            "Page %d: +%d servers (total %d)",
+            page, pageCount, #allServers
         ), "info")
 
-        -- Check if there are more pages
-        if res.nextPageCursor and res.nextPageCursor ~= "" then
-            cursor = res.nextPageCursor
+        -- Pagination
+        if decoded.nextPageCursor
+        and decoded.nextPageCursor ~= ""
+        and decoded.nextPageCursor ~= nil then
+            cursor = decoded.nextPageCursor
         else
-            log("No more pages", "info")
+            log("Last page reached", "info")
             break
         end
 
         page += 1
 
-        -- Rate limit protection between pages
+        -- Controlled delay between pages
         if page <= CONFIG.MaxPages then
             task.wait(CONFIG.PageDelay)
         end
@@ -537,22 +537,17 @@ local function findBestServer(servers)
     local candidates = {}
 
     for _, sv in ipairs(servers) do
-        -- Skip current server
         if sv.id == game.JobId then continue end
 
-        local p   = sv.playing    or 0
-        local cap = sv.maxPlayers or 0
+        local p   = tonumber(sv.playing)    or 0
+        local cap = tonumber(sv.maxPlayers) or 0
 
-        -- Must be in target range
         if p >= CONFIG.MinPlayers and p <= CONFIG.MaxPlayers then
-            -- Score: closer to midpoint of range = better
-            -- Also prefer lower ping
             local midpoint  = (CONFIG.MinPlayers + CONFIG.MaxPlayers) / 2
             local distScore = 1 / (1 + math.abs(p - midpoint))
             local pingScore = sv.ping and (1 / (1 + sv.ping)) or 0.5
             local fillScore = cap > 0 and (p / cap) or 0
-
-            local total = distScore * 0.5 + pingScore * 0.3 + fillScore * 0.2
+            local total     = distScore * 0.5 + pingScore * 0.3 + fillScore * 0.2
 
             table.insert(candidates, { server = sv, score = total })
         end
@@ -560,19 +555,18 @@ local function findBestServer(servers)
 
     if #candidates == 0 then return nil end
 
-    -- Sort by score descending
-    table.sort(candidates, function(a, b)
-        return a.score > b.score
-    end)
+    table.sort(candidates, function(a, b) return a.score > b.score end)
 
-    -- Log top 3 candidates
+    -- Log top candidates
     for i = 1, math.min(3, #candidates) do
         local c  = candidates[i]
         local sv = c.server
         log(string.format(
-            "#%d: %dP | ping ~%s | score %.2f",
-            i, sv.playing,
-            sv.ping and math.floor(sv.ping) or "?",
+            "#%d: %dP/%dP | ping~%s | score %.2f",
+            i,
+            tonumber(sv.playing) or 0,
+            tonumber(sv.maxPlayers) or 0,
+            sv.ping and tostring(math.floor(sv.ping)) or "?",
             c.score
         ), "info")
     end
@@ -593,34 +587,38 @@ scanAndTeleport = function(originalCall)
 
     State.IsScanning   = true
     State.LastScanTime = os.time()
-    setStatus("Scanning servers...")
+    setStatus("Scanning...")
     log(string.format(
-        "Scan start | range [%d-%dP] | %d pages",
-        CONFIG.MinPlayers, CONFIG.MaxPlayers, CONFIG.MaxPages
+        "Scan | range [%d-%dP] | %d pages x %d",
+        CONFIG.MinPlayers, CONFIG.MaxPlayers,
+        CONFIG.MaxPages, CONFIG.ServerFetchLimit
     ), "scan")
 
     local servers = fetchAllServers()
 
     if not servers then
-        log("No servers fetched at all", "err")
+        log("No servers returned at all", "err")
         setStatus("Scan failed - fallback")
         State.IsScanning = false
         if originalCall then originalCall() end
         return
     end
 
-    log("Total servers fetched: " .. #servers, "info")
+    log("Total fetched: " .. #servers .. " servers", "info")
 
     local target = findBestServer(servers)
 
     if target then
+        local p    = tonumber(target.playing) or 0
+        local cap  = tonumber(target.maxPlayers) or 0
         local ping = target.ping and math.floor(target.ping) or "?"
+
         log(string.format(
-            "Target locked: %dP/%dP | ~%sms ping",
-            target.playing, target.maxPlayers, tostring(ping)
+            "Target: %dP/%dP | ~%sms",
+            p, cap, tostring(ping)
         ), "ok")
-        setStatus("Teleporting to " .. target.playing .. "P server")
-        log("ID: " .. target.id:sub(1, 18) .. "...", "ok")
+        setStatus("Teleporting to " .. p .. "P server")
+        log("Joining " .. tostring(target.id):sub(1, 18) .. "...", "ok")
 
         task.wait(0.15)
 
@@ -629,22 +627,24 @@ scanAndTeleport = function(originalCall)
         end)
 
         if not tpOk then
-            log("Teleport error: " .. tostring(tpErr), "err")
+            log("Teleport failed: " .. tostring(tpErr), "err")
             setStatus("Teleport failed - fallback")
             if originalCall then originalCall() end
         end
     else
-        -- Dump player counts of all fetched servers for diagnosis
+        -- Dump player counts for diagnosis
         local counts = {}
         for _, sv in ipairs(servers) do
-            table.insert(counts, tostring(sv.playing or 0))
+            local p = tonumber(sv.playing) or 0
+            table.insert(counts, tostring(p))
         end
-        log("Servers found (player counts): " .. table.concat(counts, ","):sub(1,80), "warn")
+        local countStr = table.concat(counts, " "):sub(1, 100)
+        log("Player counts: " .. countStr, "warn")
         log(string.format(
-            "No match in [%d-%dP] range. Adjust range!",
+            "No server matched [%d-%dP] — adjust range!",
             CONFIG.MinPlayers, CONFIG.MaxPlayers
         ), "warn")
-        setStatus("No target - try adjusting range")
+        setStatus("No match - adjust range with buttons")
         if originalCall then originalCall() end
     end
 
@@ -665,17 +665,18 @@ clearBtn.MouseButton1Click:Connect(function()
 end)
 
 infoBtn.MouseButton1Click:Connect(function()
-    local httpMethod = "none detected"
-    if request       then httpMethod = "request()"      end
-    if syn and syn.request then httpMethod = "syn.request" end
-    if http_request  then httpMethod = "http_request()" end
+    -- Detect active HTTP method
+    local method = "none"
+    if http_request       then method = "http_request()" end
+    if request            then method = method .. " + request()" end
+    if syn and syn.request then method = method .. " + syn.request" end
 
-    log("Executor HTTP: " .. httpMethod, "info")
-    log("PlaceId: "  .. tostring(PlaceId), "info")
-    log("JobId: "    .. game.JobId:sub(1,14) .. "...", "info")
-    log("Players in this server: " .. #game.Players:GetPlayers(), "info")
+    log("HTTP: " .. method, "info")
+    log("PlaceId: " .. tostring(PlaceId), "info")
+    log("JobId: "   .. game.JobId:sub(1, 14) .. "...", "info")
+    log("Players here: " .. #Players:GetPlayers(), "info")
     log(string.format(
-        "Config: [%d-%dP] | %d pages | %dp delay",
+        "Range [%d-%dP] | %d pages | %.1fs delay",
         CONFIG.MinPlayers, CONFIG.MaxPlayers,
         CONFIG.MaxPages, CONFIG.PageDelay
     ), "info")
@@ -694,16 +695,19 @@ if hookmetamethod and getnamecallmethod then
             State.HijackCount += 1
 
             if (os.time() - State.LastScanTime) < CONFIG.ScanCooldown then
-                log("Cooldown active - passthrough", "warn")
+                log("Cooldown - passing through", "warn")
                 return oldNC(self, ...)
             end
 
             local args = { ... }
             task.spawn(function()
                 scanAndTeleport(function()
-                    pcall(function() oldNC(self, table.unpack(args)) end)
+                    pcall(function()
+                        oldNC(self, table.unpack(args))
+                    end)
                 end)
             end)
+
             return nil
         end
 
@@ -712,7 +716,7 @@ if hookmetamethod and getnamecallmethod then
 
     log("Hook active", "ok")
 else
-    log("hookmetamethod not available", "warn")
+    log("hookmetamethod unavailable", "warn")
     setStatus("Hook N/A - scan-only mode")
 end
 
@@ -720,6 +724,6 @@ end
 -- STARTUP
 -- ============================================================
 log("SR Hijacker " .. CONFIG.Version .. " ready", "ok")
-log("Server time: " .. os.date("!%H:%M:%S") .. " UTC", "time")
+log("Time: " .. os.date("!%H:%M:%S") .. " UTC", "time")
 log("Press INFO for diagnostics", "info")
-log("Use Min/Max buttons to adjust target range", "info")
+log("Press SCAN or trigger QuickPlay", "info")
