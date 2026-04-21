@@ -3,12 +3,13 @@
 -- ============================================================
 
 local CONFIG = {
-    URL           = "https://cdn.discordapp.com/attachments/1489720049932439798/1496216646447009962/ikuyo.bin?ex=69e913d6&is=69e7c256&hm=4f2b051e3c3b9cd76c165612fa177ae88d6200a661aef78aa5fb064ea1326329&",
-    RAW_SIZE      = 64,
-    DISPLAY_SIZE  = UDim2.new(0, 26, 0, 26),
-    FPS           = 12,
-    TARGET_NAME   = "Main",
-    HIDE_ORIGINAL = true,
+    URL              = "https://cdn.discordapp.com/attachments/1489720049932439798/1496216646447009962/ikuyo.bin?ex=69e913d6&is=69e7c256&hm=4f2b051e3c3b9cd76c165612fa177ae88d6200a661aef78aa5fb064ea1326329&",
+    RAW_SIZE         = 64,
+    DISPLAY_SIZE     = UDim2.new(0, 26, 0, 26),
+    FPS              = 12,
+    TARGET_NAME      = "Main",
+    HIDE_ORIGINAL    = true,
+    IMAGE_TRANSPARENCY = 0, -- 0 = fully visible, 1 = fully invisible
 }
 
 local Players      = game:GetService("Players")
@@ -157,7 +158,7 @@ local function init()
     local overlay = Instance.new("ImageLabel")
     overlay.Name                   = "AnimatedCrosshairOverlay"
     overlay.BackgroundTransparency = 1
-    overlay.ImageTransparency      = 0
+    overlay.ImageTransparency      = CONFIG.IMAGE_TRANSPARENCY  -- ← applied here
     overlay.BorderSizePixel        = 0
     overlay.ZIndex                 = mainFrame.ZIndex + 50
     overlay.Size                   = CONFIG.DISPLAY_SIZE
@@ -167,6 +168,7 @@ local function init()
 
     log("Overlay created", GREEN)
     log("ZIndex: " .. overlay.ZIndex, WHITE)
+    log("Transparency: " .. CONFIG.IMAGE_TRANSPARENCY, WHITE)
 
     -- Step 7: Link EditableImage (same order as working reference)
     local linked = false
@@ -214,9 +216,10 @@ local function init()
 
     RunService.RenderStepped:Connect(function()
         -- Keep synced to original crosshair position
-        overlay.Size        = CONFIG.DISPLAY_SIZE
-        overlay.Position    = mainFrame.Position
-        overlay.AnchorPoint = mainFrame.AnchorPoint
+        overlay.Size             = CONFIG.DISPLAY_SIZE
+        overlay.Position         = mainFrame.Position
+        overlay.AnchorPoint      = mainFrame.AnchorPoint
+        overlay.ImageTransparency = CONFIG.IMAGE_TRANSPARENCY  -- ← stays in sync if changed at runtime
 
         local frameIndex = math.floor((tick() - startTime) * CONFIG.FPS) % totalFrames
 
@@ -236,4 +239,4 @@ local function init()
     end)
 end
 
-task.spawn(init) 
+task.spawn(init)
