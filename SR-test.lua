@@ -1,5 +1,5 @@
 -- ============================================================
---  ANIMATED CROSSHAIR - AUTO-SYNC, BG REMOVER, SCREEN LOG
+--  ANIMATED CROSSHAIR - FULL SCRIPT
 -- ============================================================
 
 local CONFIG = {
@@ -24,238 +24,249 @@ local Players      = game:GetService("Players")
 local AssetService = game:GetService("AssetService")
 local RunService   = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local CoreGui      = game:GetService("CoreGui")
 
 local player = Players.LocalPlayer
 
 -- ============================================================
---  SCREEN LOGGER
---  Placed in CoreGui so it ALWAYS appears regardless of
---  executor ScreenGui restrictions on PlayerGui
+--  FIND SAFE GUI PARENT
+--  Tries every known executor-safe container in order
 -- ============================================================
-local LOG = {}
-do
-    -- Destroy any old instance first
-    local old = CoreGui:FindFirstChild("__CrosshairLogger")
-    if old then old:Destroy() end
-
-    local screenGui = Instance.new("ScreenGui")
-    screenGui.Name            = "__CrosshairLogger"
-    screenGui.ResetOnSpawn    = false
-    screenGui.IgnoreGuiInset  = true
-    screenGui.DisplayOrder    = 9999
-    screenGui.ZIndexBehavior  = Enum.ZIndexBehavior.Global
-
-    -- Try CoreGui first, fallback to PlayerGui
-    local ok = pcall(function()
-        screenGui.Parent = CoreGui
-    end)
-    if not ok then
-        screenGui.Parent = player:WaitForChild("PlayerGui")
+local function getSafeGuiParent()
+    -- gethui() is supported by most modern executors (Synapse, Fluxus, etc.)
+    if gethui then
+        local ok, result = pcall(gethui)
+        if ok and result then
+            return result
+        end
     end
 
-    -- Outer container (draggable)
-    local container = Instance.new("Frame")
-    container.Name                 = "Container"
-    container.Size                 = UDim2.new(0, 340, 0, 24)
-    container.Position             = UDim2.new(0, 8, 0, 8)
-    container.BackgroundColor3     = Color3.fromRGB(10, 10, 10)
-    container.BorderSizePixel      = 0
-    container.ClipsDescendants     = true
-    container.Parent               = screenGui
+    -- Some executors expose it differently
+    if get_hidden_gui then
+        local ok, result = pcall(get_hidden_gui)
+        if ok and result then
+            return result
+        end
+    end
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 6)
-    corner.Parent       = container
+    -- CoreGui fallback
+    local CoreGui = game:GetService("CoreGui")
+    local ok = pcall(function()
+        local t = Instance.new("Frame")
+        t.Parent = CoreGui
+        t:Destroy()
+    end)
+    if ok then return CoreGui end
 
-    local stroke = Instance.new("UIStroke")
-    stroke.Color     = Color3.fromRGB(60, 60, 60)
-    stroke.Thickness = 1
-    stroke.Parent    = container
+    -- Last resort: PlayerGui
+    return player:WaitForChild("PlayerGui")
+end
+
+-- ============================================================
+--  LOGGER
+-- ============================================================
+local LOG    = {}
+local _rows  = 0
+local _scroll = nil
+local _container = nil
+
+do
+    local safeParent = getSafeGuiParent()
+
+    -- Clean up old logger if rerunning
+    for _, v in ipairs(safeParent:GetChildren()) do
+        if v.Name == "__CLog" then v:Destroy() end
+    end
+
+    local sg = Instance.new("ScreenGui")
+    sg.Name           = "__CLog"
+    sg.ResetOnSpawn   = false
+    sg.IgnoreGuiInset = true
+    sg.DisplayOrder   = 999999
+    sg.Parent         = safeParent
+
+    -- Main window
+    local win = Instance.new("Frame")
+    win.Name              = "Win"
+    win.Size              = UDim2.new(0, 350, 0, 240)
+    win.Position          = UDim2.new(0, 6, 0, 6)
+    win.BackgroundColor3  = Color3.fromRGB(12, 12, 12)
+    win.BorderSizePixel   = 0
+    win.ClipsDescendants  = true
+    win.Parent            = sg
+    _container            = win
+
+    Instance.new("UICorner", win).CornerRadius = UDim.new(0, 8)
+
+    local winStroke = Instance.new("UIStroke", win)
+    winStroke.Color     = Color3.fromRGB(55, 55, 55)
+    winStroke.Thickness = 1
 
     -- Title bar
-    local titleBar = Instance.new("Frame")
-    titleBar.Name              = "TitleBar"
-    titleBar.Size              = UDim2.new(1, 0, 0, 24)
-    titleBar.BackgroundColor3  = Color3.fromRGB(25, 25, 25)
-    titleBar.BorderSizePixel   = 0
-    titleBar.Parent            = container
+    local bar = Instance.new("Frame")
+    bar.Name             = "Bar"
+    bar.Size             = UDim2.new(1, 0, 0, 26)
+    bar.BackgroundColor3 = Color3.fromRGB(22, 22, 22)
+    bar.BorderSizePixel  = 0
+    bar.Parent           = win
 
-    local titleCorner = Instance.new("UICorner")
-    titleCorner.CornerRadius = UDim.new(0, 6)
-    titleCorner.Parent       = titleBar
+    Instance.new("UICorner", bar).CornerRadius = UDim.new(0, 8)
 
-    local titleLabel = Instance.new("TextLabel")
-    titleLabel.Size                = UDim2.new(1, -30, 1, 0)
-    titleLabel.Position            = UDim2.new(0, 8, 0, 0)
-    titleLabel.BackgroundTransparency = 1
-    titleLabel.Text                = "Crosshair Logger"
-    titleLabel.TextColor3          = Color3.fromRGB(180, 180, 180)
-    titleLabel.TextSize            = 12
-    titleLabel.Font                = Enum.Font.Code
-    titleLabel.TextXAlignment      = Enum.TextXAlignment.Left
-    titleLabel.Parent              = titleBar
+    local barTitle = Instance.new("TextLabel")
+    barTitle.Size                = UDim2.new(1, -30, 1, 0)
+    barTitle.Position            = UDim2.new(0, 10, 0, 0)
+    barTitle.BackgroundTransparency = 1
+    barTitle.Text                = "◈ Crosshair Debug"
+    barTitle.TextColor3          = Color3.fromRGB(160, 160, 160)
+    barTitle.TextSize            = 12
+    barTitle.Font                = Enum.Font.Code
+    barTitle.TextXAlignment      = Enum.TextXAlignment.Left
+    barTitle.Parent              = bar
 
-    -- Toggle button
     local toggleBtn = Instance.new("TextButton")
-    toggleBtn.Size                 = UDim2.new(0, 24, 0, 24)
-    toggleBtn.Position             = UDim2.new(1, -24, 0, 0)
+    toggleBtn.Size               = UDim2.new(0, 26, 0, 26)
+    toggleBtn.Position           = UDim2.new(1, -26, 0, 0)
     toggleBtn.BackgroundTransparency = 1
-    toggleBtn.Text                 = "-"
-    toggleBtn.TextColor3           = Color3.fromRGB(200, 200, 200)
-    toggleBtn.TextSize             = 16
-    toggleBtn.Font                 = Enum.Font.Code
-    toggleBtn.Parent               = titleBar
+    toggleBtn.Text               = "−"
+    toggleBtn.TextColor3         = Color3.fromRGB(180, 180, 180)
+    toggleBtn.TextSize           = 18
+    toggleBtn.Font               = Enum.Font.Code
+    toggleBtn.Parent             = bar
 
-    -- Scroll frame for logs
-    local scrollFrame = Instance.new("ScrollingFrame")
-    scrollFrame.Name               = "LogScroll"
-    scrollFrame.Size               = UDim2.new(1, 0, 1, -24)
-    scrollFrame.Position           = UDim2.new(0, 0, 0, 24)
-    scrollFrame.BackgroundTransparency = 1
-    scrollFrame.BorderSizePixel    = 0
-    scrollFrame.ScrollBarThickness = 3
-    scrollFrame.ScrollBarImageColor3 = Color3.fromRGB(80, 80, 80)
-    scrollFrame.CanvasSize         = UDim2.new(0, 0, 0, 0)
-    scrollFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    scrollFrame.Parent             = container
+    -- Scroll area
+    local scroll = Instance.new("ScrollingFrame")
+    scroll.Name                  = "Scroll"
+    scroll.Size                  = UDim2.new(1, 0, 1, -26)
+    scroll.Position              = UDim2.new(0, 0, 0, 26)
+    scroll.BackgroundTransparency = 1
+    scroll.BorderSizePixel       = 0
+    scroll.ScrollBarThickness    = 4
+    scroll.ScrollBarImageColor3  = Color3.fromRGB(70, 70, 70)
+    scroll.CanvasSize            = UDim2.new(0, 0, 0, 0)
+    scroll.AutomaticCanvasSize   = Enum.AutomaticSize.Y
+    scroll.Parent                = win
+    _scroll                      = scroll
 
-    local listLayout = Instance.new("UIListLayout")
-    listLayout.SortOrder  = Enum.SortOrder.LayoutOrder
-    listLayout.Padding    = UDim.new(0, 1)
-    listLayout.Parent     = scrollFrame
+    local list = Instance.new("UIListLayout", scroll)
+    list.SortOrder = Enum.SortOrder.LayoutOrder
+    list.Padding   = UDim.new(0, 2)
 
-    local padding = Instance.new("UIPadding")
-    padding.PaddingLeft   = UDim.new(0, 6)
-    padding.PaddingRight  = UDim.new(0, 6)
-    padding.PaddingTop    = UDim.new(0, 4)
-    padding.Parent        = scrollFrame
+    local pad = Instance.new("UIPadding", scroll)
+    pad.PaddingLeft  = UDim.new(0, 8)
+    pad.PaddingRight = UDim.new(0, 8)
+    pad.PaddingTop   = UDim.new(0, 6)
 
-    -- Collapsed state
-    local collapsed   = false
-    local EXPANDED_H  = 220
-    local COLLAPSED_H = 24
-
-    container.Size = UDim2.new(0, 340, 0, EXPANDED_H)
+    -- Collapse / expand
+    local open = true
+    local OPEN_H   = 240
+    local CLOSE_H  = 26
 
     toggleBtn.MouseButton1Click:Connect(function()
-        collapsed = not collapsed
-        toggleBtn.Text = collapsed and "+" or "-"
-        local targetH  = collapsed and COLLAPSED_H or EXPANDED_H
-        TweenService:Create(
-            container,
-            TweenInfo.new(0.2, Enum.EasingStyle.Quad),
-            { Size = UDim2.new(0, 340, 0, targetH) }
-        ):Play()
+        open = not open
+        toggleBtn.Text = open and "−" or "+"
+        TweenService:Create(win, TweenInfo.new(0.18, Enum.EasingStyle.Quad), {
+            Size = UDim2.new(0, 350, 0, open and OPEN_H or CLOSE_H)
+        }):Play()
     end)
 
-    -- Drag logic
-    local dragging, dragStart, startPos
-    titleBar.InputBegan:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
-            dragging  = true
-            dragStart = inp.Position
-            startPos  = container.Position
+    -- Drag
+    local dragging, dragStart, winStart
+    bar.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStart = i.Position
+            winStart  = win.Position
         end
     end)
-    titleBar.InputChanged:Connect(function(inp)
+    bar.InputChanged:Connect(function(i)
         if dragging and (
-            inp.UserInputType == Enum.UserInputType.MouseMovement or
-            inp.UserInputType == Enum.UserInputType.Touch
+            i.UserInputType == Enum.UserInputType.MouseMovement or
+            i.UserInputType == Enum.UserInputType.Touch
         ) then
-            local delta = inp.Position - dragStart
-            container.Position = UDim2.new(
-                startPos.X.Scale,
-                startPos.X.Offset + delta.X,
-                startPos.Y.Scale,
-                startPos.Y.Offset + delta.Y
+            local d = i.Position - dragStart
+            win.Position = UDim2.new(
+                winStart.X.Scale, winStart.X.Offset + d.X,
+                winStart.Y.Scale, winStart.Y.Offset + d.Y
             )
         end
     end)
-    titleBar.InputEnded:Connect(function(inp)
-        if inp.UserInputType == Enum.UserInputType.MouseButton1
-        or inp.UserInputType == Enum.UserInputType.Touch then
+    bar.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1
+        or i.UserInputType == Enum.UserInputType.Touch then
             dragging = false
         end
     end)
 
-    -- Log entry counter
-    local entryCount = 0
-
-    local COLOR_MAP = {
-        info  = Color3.fromRGB(220, 220, 220),
-        ok    = Color3.fromRGB(0,   220, 100),
+    -- Color map
+    local COLORS = {
+        info  = Color3.fromRGB(210, 210, 210),
+        ok    = Color3.fromRGB(0,   210, 100),
         warn  = Color3.fromRGB(255, 200, 0  ),
-        error = Color3.fromRGB(255, 70,  70 ),
-        cyan  = Color3.fromRGB(0,   200, 255),
+        error = Color3.fromRGB(255, 65,  65 ),
+        cyan  = Color3.fromRGB(0,   190, 255),
     }
 
-    -- Public log function
+    local PREFIX = {
+        info  = "  ",
+        ok    = "✓ ",
+        warn  = "⚠ ",
+        error = "✗ ",
+        cyan  = "» ",
+    }
+
     function LOG.print(msg, level)
         level = level or "info"
 
-        -- Also output to executor console as backup
-        if level == "error" or level == "warn" then
-            warn("[Crosshair][" .. level:upper() .. "] " .. msg)
+        -- Backup to executor console
+        if level == "error" then
+            warn("[CLog][ERR] " .. msg)
+        elseif level == "warn" then
+            warn("[CLog][WRN] " .. msg)
         else
-            print("[Crosshair] " .. msg)
+            print("[CLog] " .. msg)
         end
 
-        entryCount += 1
+        _rows += 1
 
         local row = Instance.new("Frame")
-        row.Name               = "Row_" .. entryCount
-        row.Size               = UDim2.new(1, 0, 0, 16)
+        row.Name               = tostring(_rows)
+        row.Size               = UDim2.new(1, 0, 0, 17)
         row.BackgroundTransparency = 1
-        row.LayoutOrder        = entryCount
-        row.Parent             = scrollFrame
+        row.LayoutOrder        = _rows
+        row.Parent             = _scroll
 
-        local label = Instance.new("TextLabel")
-        label.Size              = UDim2.new(1, 0, 1, 0)
-        label.BackgroundTransparency = 1
-        label.TextColor3        = COLOR_MAP[level] or COLOR_MAP.info
-        label.TextSize          = 12
-        label.Font              = Enum.Font.Code
-        label.TextXAlignment    = Enum.TextXAlignment.Left
-        label.TextYAlignment    = Enum.TextYAlignment.Center
-        label.TextWrapped       = true
-        label.Text              = msg
-        label.Parent            = row
+        local lbl = Instance.new("TextLabel")
+        lbl.Size                = UDim2.new(1, 0, 1, 0)
+        lbl.BackgroundTransparency = 1
+        lbl.TextColor3          = COLORS[level] or COLORS.info
+        lbl.TextSize            = 12
+        lbl.Font                = Enum.Font.Code
+        lbl.TextXAlignment      = Enum.TextXAlignment.Left
+        lbl.TextWrapped         = true
+        lbl.Text                = (PREFIX[level] or "  ") .. msg
+        lbl.Parent              = row
 
-        -- Dynamically resize row if text wraps
+        -- Resize row if text wraps, then scroll to bottom
         task.defer(function()
-            local textH = label.TextBounds.Y
-            if textH > 16 then
-                row.Size = UDim2.new(1, 0, 0, textH + 2)
+            local h = lbl.TextBounds.Y
+            if h > 17 then
+                row.Size = UDim2.new(1, 0, 0, h + 2)
             end
-            -- Auto-scroll to bottom
-            scrollFrame.CanvasPosition = Vector2.new(
+            _scroll.CanvasPosition = Vector2.new(
                 0,
-                math.max(0, scrollFrame.AbsoluteCanvasSize.Y - scrollFrame.AbsoluteSize.Y)
+                math.max(0, _scroll.AbsoluteCanvasSize.Y - _scroll.AbsoluteSize.Y)
             )
         end)
     end
 
-    -- Auto-hide after delay (optional, set to nil to keep forever)
-    function LOG.autoHide(seconds)
-        task.delay(seconds, function()
-            TweenService:Create(
-                container,
-                TweenInfo.new(0.5, Enum.EasingStyle.Quad),
-                { BackgroundTransparency = 1 }
-            ):Play()
-            for _, v in ipairs(screenGui:GetDescendants()) do
-                if v:IsA("TextLabel") or v:IsA("TextButton") then
-                    TweenService:Create(
-                        v,
-                        TweenInfo.new(0.5),
-                        { TextTransparency = 1 }
-                    ):Play()
-                end
-            end
-            task.wait(0.6)
-            screenGui:Destroy()
+    function LOG.hide(after)
+        task.delay(after or 8, function()
+            TweenService:Create(win, TweenInfo.new(0.6, Enum.EasingStyle.Quad), {
+                BackgroundTransparency = 1,
+                Size = UDim2.new(0, 350, 0, 0),
+            }):Play()
+            task.wait(0.65)
+            sg:Destroy()
         end)
     end
 end
@@ -274,7 +285,7 @@ function BgRemover.new(cfg, imgSize)
     self.pixelCount = imgSize.X * imgSize.Y
     self.visited    = table.create(self.pixelCount, false)
     self.queue      = table.create(self.pixelCount, 0)
-    LOG.print("BgRemover ready | mode=" .. cfg.MODE .. " tol=" .. cfg.TOLERANCE, "cyan")
+    LOG.print("BgRemover | mode=" .. cfg.MODE .. " tol=" .. cfg.TOLERANCE, "cyan")
     return self
 end
 
@@ -282,115 +293,114 @@ function BgRemover:_offset(x, y)
     return (y * self.width + x) * 4
 end
 
-local function colorDistSq(r1, g1, b1, r2, g2, b2)
-    local dr, dg, db = r1-r2, g1-g2, b1-b2
+local function colorDistSq(r1,g1,b1,r2,g2,b2)
+    local dr,dg,db = r1-r2, g1-g2, b1-b2
     return dr*dr + dg*dg + db*db
 end
 
 function BgRemover:_detectBgColor(buf)
     local mode = self.cfg.MODE
-    if mode == "white" then return 255, 255, 255
-    elseif mode == "black" then return 0, 0, 0
+    if mode == "white" then return 255,255,255
+    elseif mode == "black" then return 0,0,0
     elseif mode == "color" then
-        local c = self.cfg.BG_COLOR
-        return c.R, c.G, c.B
+        return self.cfg.BG_COLOR.R, self.cfg.BG_COLOR.G, self.cfg.BG_COLOR.B
     else
-        local W, H = self.width, self.height
-        local samples = {
+        local W,H = self.width, self.height
+        local pts = {
             {0,0},{1,0},{0,1},
             {W-1,0},{W-2,0},{W-1,1},
             {0,H-1},{W-1,H-1},
         }
-        local rS, gS, bS, n = 0, 0, 0, 0
-        for _, s in ipairs(samples) do
-            local ox, oy = s[1], s[2]
-            if ox >= 0 and ox < W and oy >= 0 and oy < H then
-                local off = self:_offset(ox, oy)
-                rS += buffer.readu8(buf, off)
-                gS += buffer.readu8(buf, off+1)
-                bS += buffer.readu8(buf, off+2)
+        local rS,gS,bS,n = 0,0,0,0
+        for _,p in ipairs(pts) do
+            local ox,oy = p[1],p[2]
+            if ox>=0 and ox<W and oy>=0 and oy<H then
+                local off = self:_offset(ox,oy)
+                rS += buffer.readu8(buf,off)
+                gS += buffer.readu8(buf,off+1)
+                bS += buffer.readu8(buf,off+2)
                 n  += 1
             end
         end
-        if n == 0 then return 255,255,255 end
-        return
-            math.floor(rS/n+.5),
-            math.floor(gS/n+.5),
-            math.floor(bS/n+.5)
+        if n==0 then return 255,255,255 end
+        return math.floor(rS/n+.5), math.floor(gS/n+.5), math.floor(bS/n+.5)
     end
 end
 
-function BgRemover:_floodFill(buf, bgR, bgG, bgB)
-    local W, H    = self.width, self.height
-    local tolSq   = self.cfg.TOLERANCE^2 * 3
-    local visited = self.visited
-    local queue   = self.queue
+function BgRemover:_floodFill(buf, bgR,bgG,bgB)
+    local W,H   = self.width, self.height
+    local tolSq = self.cfg.TOLERANCE^2 * 3
+    local vis   = self.visited
+    local que   = self.queue
 
-    for i = 1, self.pixelCount do visited[i] = false end
+    for i=1,self.pixelCount do vis[i]=false end
 
-    local qHead, qTail = 1, 0
+    local qH,qT = 1,0
 
-    local function tryEnqueue(x, y)
-        if x < 0 or x >= W or y < 0 or y >= H then return end
-        local idx = y * W + x + 1
-        if visited[idx] then return end
+    local function enq(x,y)
+        if x<0 or x>=W or y<0 or y>=H then return end
+        local idx = y*W+x+1
+        if vis[idx] then return end
         local off = (idx-1)*4
-        local pa  = buffer.readu8(buf, off+3)
-        local isBg = (pa == 0) or (colorDistSq(
-            buffer.readu8(buf,off), buffer.readu8(buf,off+1), buffer.readu8(buf,off+2),
-            bgR, bgG, bgB
+        local pa  = buffer.readu8(buf,off+3)
+        local bg  = (pa==0) or (colorDistSq(
+            buffer.readu8(buf,off),
+            buffer.readu8(buf,off+1),
+            buffer.readu8(buf,off+2),
+            bgR,bgG,bgB
         ) <= tolSq)
-        if isBg then
-            visited[idx] = true
-            qTail += 1
-            queue[qTail] = idx
+        if bg then
+            vis[idx]=true
+            qT+=1
+            que[qT]=idx
         end
     end
 
-    for x = 0, W-1 do tryEnqueue(x,0) tryEnqueue(x,H-1) end
-    for y = 1, H-2 do tryEnqueue(0,y) tryEnqueue(W-1,y) end
+    for x=0,W-1 do enq(x,0) enq(x,H-1) end
+    for y=1,H-2 do enq(0,y) enq(W-1,y) end
 
-    while qHead <= qTail do
-        local idx = queue[qHead]; qHead += 1
-        local x = (idx-1) % W
-        local y = math.floor((idx-1) / W)
-        tryEnqueue(x-1,y) tryEnqueue(x+1,y)
-        tryEnqueue(x,y-1) tryEnqueue(x,y+1)
+    while qH<=qT do
+        local idx=que[qH]; qH+=1
+        local x=(idx-1)%W
+        local y=math.floor((idx-1)/W)
+        enq(x-1,y) enq(x+1,y) enq(x,y-1) enq(x,y+1)
     end
 
-    return visited
+    return vis
 end
 
 function BgRemover:processFrame(buf)
     if not self.cfg.ENABLED then return end
-    local W, H    = self.width, self.height
-    local tol     = self.cfg.TOLERANCE
-    local feather = self.cfg.FEATHER
-    local tolSq   = tol*tol*3
-    local bgR, bgG, bgB = self:_detectBgColor(buf)
-    local bgMask  = self.cfg.FLOOD_FILL and self:_floodFill(buf, bgR, bgG, bgB) or nil
+    local W,H    = self.width, self.height
+    local tol    = self.cfg.TOLERANCE
+    local feath  = self.cfg.FEATHER
+    local tolSq  = tol*tol*3
+    local bgR,bgG,bgB = self:_detectBgColor(buf)
+    local mask   = self.cfg.FLOOD_FILL and self:_floodFill(buf,bgR,bgG,bgB) or nil
 
-    for y = 0, H-1 do
-        for x = 0, W-1 do
+    for y=0,H-1 do
+        for x=0,W-1 do
             local idx = y*W+x+1
             local off = (idx-1)*4
-            if bgMask and not bgMask[idx] then goto continue end
-            local pa  = buffer.readu8(buf, off+3)
-            if pa == 0 then goto continue end
+            if mask and not mask[idx] then goto c end
+            local pa = buffer.readu8(buf,off+3)
+            if pa==0 then goto c end
             local dSq = colorDistSq(
-                buffer.readu8(buf,off), buffer.readu8(buf,off+1), buffer.readu8(buf,off+2),
-                bgR, bgG, bgB
+                buffer.readu8(buf,off),
+                buffer.readu8(buf,off+1),
+                buffer.readu8(buf,off+2),
+                bgR,bgG,bgB
             )
-            if dSq <= tolSq then
+            if dSq<=tolSq then
                 local newA = 0
-                if feather > 0 then
-                    local blend = math.min(math.sqrt(dSq) / (tol * 1.7321 * feather), 1)
-                    blend  = blend*blend*(3-2*blend)
-                    newA   = math.floor(pa * blend + .5)
+                if feath>0 then
+                    local b = math.min(math.sqrt(dSq)/(tol*1.7321*feath),1)
+                    b = b*b*(3-2*b)
+                    newA = math.floor(pa*b+.5)
                 end
-                buffer.writeu8(buf, off+3, newA)
+                buffer.writeu8(buf,off+3,newA)
             end
-            ::continue::
+            ::c::
         end
     end
 end
@@ -399,43 +409,43 @@ end
 --  EDITABLE IMAGE HELPERS
 -- ============================================================
 local function createEditableImage(size)
-    local img, ok, err
+    local img
 
-    ok, err = pcall(function()
+    local ok, err = pcall(function()
         img = AssetService:CreateEditableImage({ Size = size })
     end)
     if ok and img then
-        LOG.print("EditableImage created (AssetService)", "ok")
+        LOG.print("EditableImage via AssetService", "ok")
         return img
     end
-    LOG.print("AssetService method failed: " .. tostring(err), "warn")
+    LOG.print("AssetService failed: " .. tostring(err), "warn")
 
     ok, err = pcall(function()
         img = Instance.new("EditableImage")
         img.Size = size
     end)
     if ok and img then
-        LOG.print("EditableImage created (Instance.new)", "ok")
+        LOG.print("EditableImage via Instance.new", "ok")
         return img
     end
-    LOG.print("Instance.new method failed: " .. tostring(err), "warn")
+    LOG.print("Instance.new failed: " .. tostring(err), "warn")
 
     return nil
 end
 
-local function linkEditableImage(label, editImg)
-    local methods = {
-        { name = "Content.fromObject",      fn = function() label.Content      = Content.fromObject(editImg) end },
-        { name = "ImageContent.fromObject", fn = function() label.ImageContent = Content.fromObject(editImg) end },
-        { name = "SetParent",               fn = function() editImg:SetParent(label) end },
+local function linkEditableImage(lbl, img)
+    local tries = {
+        { "Content.fromObject",      function() lbl.Content      = Content.fromObject(img) end },
+        { "ImageContent.fromObject", function() lbl.ImageContent = Content.fromObject(img) end },
+        { "SetParent",               function() img:SetParent(lbl) end },
     }
-    for _, m in ipairs(methods) do
-        local ok, err = pcall(m.fn)
+    for _, t in ipairs(tries) do
+        local ok, err = pcall(t[2])
         if ok then
-            LOG.print("Linked via " .. m.name, "ok")
+            LOG.print("Linked: " .. t[1], "ok")
             return true
         end
-        LOG.print("Link [" .. m.name .. "] failed: " .. tostring(err), "warn")
+        LOG.print("Link [" .. t[1] .. "] failed: " .. tostring(err), "warn")
     end
     return false
 end
@@ -445,81 +455,73 @@ end
 -- ============================================================
 local function init()
     task.wait(2)
-    LOG.print("Script started", "ok")
+    LOG.print("Initialising...", "info")
 
-    -- ── 1. Find target frame ─────────────────────────────────
-    local pGui     = player:WaitForChild("PlayerGui")
-    local mainFrame = nil
+    -- 1. Find target frame
+    local pGui = player:WaitForChild("PlayerGui")
+    local mainFrame
 
-    for _, v in ipairs(pGui:GetDescendants()) do
-        if v.Name == CONFIG.TARGET_NAME and v:IsA("Frame") then
-            mainFrame = v
-            break
-        end
-    end
-
-    if not mainFrame then
-        LOG.print("Waiting for '" .. CONFIG.TARGET_NAME .. "' frame...", "warn")
-        local t = tick()
-        while not mainFrame and tick()-t < 15 do
-            task.wait(0.5)
-            for _, v in ipairs(pGui:GetDescendants()) do
-                if v.Name == CONFIG.TARGET_NAME and v:IsA("Frame") then
-                    mainFrame = v
-                    break
-                end
+    local function searchFrame()
+        for _, v in ipairs(pGui:GetDescendants()) do
+            if v.Name == CONFIG.TARGET_NAME and v:IsA("Frame") then
+                return v
             end
         end
     end
 
+    mainFrame = searchFrame()
     if not mainFrame then
-        LOG.print("Target frame not found! Aborting.", "error")
+        LOG.print("Waiting for frame '" .. CONFIG.TARGET_NAME .. "'...", "warn")
+        local t = tick()
+        while not mainFrame and tick()-t < 15 do
+            task.wait(0.5)
+            mainFrame = searchFrame()
+        end
+    end
+
+    if not mainFrame then
+        LOG.print("Frame not found! Aborting.", "error")
         return
     end
-    LOG.print("Found: " .. mainFrame:GetFullName(), "ok")
+    LOG.print("Frame: " .. mainFrame:GetFullName(), "ok")
 
-    -- ── 2. HTTP fetch ────────────────────────────────────────
+    -- 2. HTTP
     local httpFunc = (syn and syn.request)
         or (http and http.request)
         or http_request or request
 
     if not httpFunc then
-        LOG.print("No HTTP function found!", "error")
+        LOG.print("No HTTP function!", "error")
         return
     end
 
-    LOG.print("Fetching sprite data...", "info")
-
+    LOG.print("Fetching data...", "info")
     local ok1, res = pcall(httpFunc, {
         Url    = CONFIG.URL,
         Method = "GET",
-        Headers = {
-            ["User-Agent"] = "Mozilla/5.0",
-            ["Accept"]     = "*/*",
-        },
+        Headers = { ["User-Agent"]="Mozilla/5.0", ["Accept"]="*/*" },
     })
 
     if not ok1 or not res.Success or not res.Body or #res.Body == 0 then
-        LOG.print("Fetch failed! ok=" .. tostring(ok1) .. " status=" .. tostring(res and res.StatusCode), "error")
+        LOG.print("Fetch failed! status=" .. tostring(res and res.StatusCode), "error")
         return
     end
     LOG.print("Downloaded " .. #res.Body .. " bytes", "ok")
 
-    -- ── 3. Parse frames ──────────────────────────────────────
-    local masterBuf  = buffer.fromstring(res.Body)
-    local SIZE       = Vector2.new(CONFIG.RAW_SIZE, CONFIG.RAW_SIZE)
-    local frameSize  = CONFIG.RAW_SIZE * CONFIG.RAW_SIZE * 4
+    -- 3. Parse
+    local masterBuf   = buffer.fromstring(res.Body)
+    local SIZE        = Vector2.new(CONFIG.RAW_SIZE, CONFIG.RAW_SIZE)
+    local frameSize   = CONFIG.RAW_SIZE * CONFIG.RAW_SIZE * 4
     local totalFrames = math.floor(buffer.len(masterBuf) / frameSize)
 
-    LOG.print("Frame size: " .. frameSize .. "b | Frames: " .. totalFrames, "info")
-
+    LOG.print("Frames detected: " .. totalFrames, "info")
     if totalFrames == 0 then
-        LOG.print("Zero frames detected!", "error")
+        LOG.print("No frames found!", "error")
         return
     end
 
-    -- ── 4. Pre-bake with BG removal ──────────────────────────
-    local cleanFrames = nil
+    -- 4. BG removal pre-bake
+    local cleanFrames
     if CONFIG.BG_REMOVE.ENABLED then
         LOG.print("Pre-baking " .. totalFrames .. " frames...", "info")
         local bgr = BgRemover.new(CONFIG.BG_REMOVE, SIZE)
@@ -530,17 +532,16 @@ local function init()
             bgr:processFrame(fb)
             cleanFrames[i+1] = fb
         end
-        LOG.print("Pre-bake done", "ok")
+        LOG.print("Pre-bake complete", "ok")
     end
 
-    -- ── 5. EditableImage ─────────────────────────────────────
+    -- 5. EditableImage
     local editImg = createEditableImage(SIZE)
     if not editImg then
-        LOG.print("EditableImage creation failed!", "error")
+        LOG.print("EditableImage failed entirely!", "error")
         return
     end
 
-    -- Write frame 1 to validate
     local firstBuf = cleanFrames and cleanFrames[1] or (function()
         local b = buffer.create(frameSize)
         buffer.copy(b, 0, masterBuf, 0, frameSize)
@@ -551,12 +552,12 @@ local function init()
         editImg:WritePixelsBuffer(Vector2.zero, SIZE, firstBuf)
     end)
     if not ok3 then
-        LOG.print("WritePixelsBuffer failed: " .. tostring(err3), "error")
+        LOG.print("WritePixelsBuffer: " .. tostring(err3), "error")
         return
     end
-    LOG.print("Frame 1 written OK", "ok")
+    LOG.print("WritePixelsBuffer OK", "ok")
 
-    -- ── 6. Overlay ───────────────────────────────────────────
+    -- 6. Overlay
     local overlay = Instance.new("ImageLabel")
     overlay.Name                   = "AnimatedCrosshairOverlay"
     overlay.BackgroundTransparency = 1
@@ -567,16 +568,16 @@ local function init()
     overlay.Position               = mainFrame.Position
     overlay.AnchorPoint            = mainFrame.AnchorPoint
     overlay.Parent                 = mainFrame.Parent
-    LOG.print("Overlay created | ZIndex " .. overlay.ZIndex, "ok")
+    LOG.print("Overlay ready | Z=" .. overlay.ZIndex, "ok")
 
-    -- ── 7. Link ──────────────────────────────────────────────
+    -- 7. Link
     if not linkEditableImage(overlay, editImg) then
-        LOG.print("Linking failed entirely!", "error")
+        LOG.print("All link methods failed!", "error")
         overlay:Destroy()
         return
     end
 
-    -- ── 8. Hide original ─────────────────────────────────────
+    -- 8. Hide original
     if CONFIG.HIDE_ORIGINAL then
         for _, c in ipairs(mainFrame:GetChildren()) do
             pcall(function()
@@ -587,10 +588,10 @@ local function init()
         LOG.print("Original hidden", "ok")
     end
 
-    -- ── 9. Animate ───────────────────────────────────────────
-    local fallbackBuf = buffer.create(frameSize)
-    local startTime   = tick()
-    local lastFrame   = -1
+    -- 9. Animate
+    local fallback  = buffer.create(frameSize)
+    local startTime = tick()
+    local lastFrame = -1
 
     RunService.RenderStepped:Connect(function()
         overlay.Size        = CONFIG.DISPLAY_SIZE
@@ -605,16 +606,14 @@ local function init()
             if cleanFrames then
                 editImg:WritePixelsBuffer(Vector2.zero, SIZE, cleanFrames[fi+1])
             else
-                buffer.copy(fallbackBuf, 0, masterBuf, fi*frameSize, frameSize)
-                editImg:WritePixelsBuffer(Vector2.zero, SIZE, fallbackBuf)
+                buffer.copy(fallback, 0, masterBuf, fi*frameSize, frameSize)
+                editImg:WritePixelsBuffer(Vector2.zero, SIZE, fallback)
             end
         end)
     end)
 
-    LOG.print("Animation running! " .. totalFrames .. " frames @ " .. CONFIG.FPS .. "fps", "ok")
-
-    -- Auto-hide log after 10 seconds
-    LOG.autoHide(10)
+    LOG.print("Running! " .. totalFrames .. "f @ " .. CONFIG.FPS .. "fps", "ok")
+    LOG.hide(12)
 end
 
 task.spawn(init)
