@@ -9,7 +9,7 @@ local CONFIG = {
     FPS              = 12,
     TARGET_NAME      = "Main",
     HIDE_ORIGINAL    = true,
-    IMAGE_TRANSPARENCY = 0, -- 0 = fully visible, 1 = fully invisible
+    IMAGE_TRANSPARENCY = 0.5, -- 0 = fully visible, 1 = fully invisible
 }
 
 local Players      = game:GetService("Players")
