@@ -9,7 +9,7 @@ local CONFIG = {
     FPS              = 12,
     TARGET_NAME      = "Main",
     HIDE_ORIGINAL    = true,
-    IMAGE_TRANSPARENCY = 0.5, -- 0 = fully visible, 1 = fully invisible
+    IMAGE_TRANSPARENCY = 0, -- 0 = fully visible, 1 = fully invisible
 }
 
 local Players      = game:GetService("Players")
@@ -108,10 +108,10 @@ local function init()
     local masterBuffer = buffer.fromstring(res.Body)
 
     -- Step 3: Auto-detect frame count
-    local SIZE         = Vector2.new(CONFIG.RAW_SIZE, CONFIG.RAW_SIZE)
-    local frameSize    = CONFIG.RAW_SIZE * CONFIG.RAW_SIZE * 4
-    local totalFrames  = math.floor(buffer.len(masterBuffer) / frameSize)
-    local actualBytes  = buffer.len(masterBuffer)
+    local SIZE          = Vector2.new(CONFIG.RAW_SIZE, CONFIG.RAW_SIZE)
+    local frameSize     = CONFIG.RAW_SIZE * CONFIG.RAW_SIZE * 4
+    local totalFrames   = math.floor(buffer.len(masterBuffer) / frameSize)
+    local actualBytes   = buffer.len(masterBuffer)
     local expectedBytes = frameSize * totalFrames
 
     log("Total bytes: " .. actualBytes, WHITE)
@@ -158,7 +158,7 @@ local function init()
     local overlay = Instance.new("ImageLabel")
     overlay.Name                   = "AnimatedCrosshairOverlay"
     overlay.BackgroundTransparency = 1
-    overlay.ImageTransparency      = CONFIG.IMAGE_TRANSPARENCY  -- ← applied here
+    overlay.ImageTransparency      = 0
     overlay.BorderSizePixel        = 0
     overlay.ZIndex                 = mainFrame.ZIndex + 50
     overlay.Size                   = CONFIG.DISPLAY_SIZE
@@ -170,7 +170,7 @@ local function init()
     log("ZIndex: " .. overlay.ZIndex, WHITE)
     log("Transparency: " .. CONFIG.IMAGE_TRANSPARENCY, WHITE)
 
-    -- Step 7: Link EditableImage (same order as working reference)
+    -- Step 7: Link EditableImage
     local linked = false
 
     if not linked then
@@ -210,24 +210,38 @@ local function init()
     end
 
     -- Step 9: Animation + position sync loop
-    local frameBuffer = buffer.create(frameSize)
-    local startTime   = tick()
-    local lastFrame   = -1
+    -- Pre-compute alpha multiplier from config (0.0 → 1.0)
+    local frameBuffer  = buffer.create(frameSize)
+    local pixelCount   = CONFIG.RAW_SIZE * CONFIG.RAW_SIZE
+    local startTime    = tick()
+    local lastFrame    = -1
 
     RunService.RenderStepped:Connect(function()
-        -- Keep synced to original crosshair position
-        overlay.Size             = CONFIG.DISPLAY_SIZE
-        overlay.Position         = mainFrame.Position
-        overlay.AnchorPoint      = mainFrame.AnchorPoint
-        overlay.ImageTransparency = CONFIG.IMAGE_TRANSPARENCY  -- ← stays in sync if changed at runtime
+        overlay.Size        = CONFIG.DISPLAY_SIZE
+        overlay.Position    = mainFrame.Position
+        overlay.AnchorPoint = mainFrame.AnchorPoint
 
         local frameIndex = math.floor((tick() - startTime) * CONFIG.FPS) % totalFrames
-
         if frameIndex == lastFrame then return end
         lastFrame = frameIndex
 
         pcall(function()
+            -- Copy raw frame data
             buffer.copy(frameBuffer, 0, masterBuffer, frameIndex * frameSize, frameSize)
+
+            -- Apply transparency by scaling each pixel's alpha channel directly.
+            -- Each pixel = 4 bytes: R G B A. Alpha is at offset +3.
+            -- ImageTransparency on EditableImage content is unreliable,
+            -- so we bake the opacity into the alpha bytes instead.
+            if CONFIG.IMAGE_TRANSPARENCY ~= 0 then
+                local alphaScale = 1 - CONFIG.IMAGE_TRANSPARENCY
+                for i = 0, pixelCount - 1 do
+                    local alphaOffset = i * 4 + 3
+                    local originalAlpha = buffer.readu8(frameBuffer, alphaOffset)
+                    buffer.writeu8(frameBuffer, alphaOffset, math.floor(originalAlpha * alphaScale))
+                end
+            end
+
             editImg:WritePixelsBuffer(Vector2.zero, SIZE, frameBuffer)
         end)
     end)
